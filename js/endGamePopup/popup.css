@@ -1,0 +1,83 @@
+/* endGamePopup/popup.css */
+
+/* The main overlay */
+#game-popup-overlay {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.65); /* Slightly darker overlay */
+    display: flex; /* Use flexbox for centering */
+    justify-content: center;
+    align-items: center;
+    z-index: 1000; /* Ensure above canvas */
+    display: none; /* Hidden by default */
+    font-family: 'Arial', sans-serif; /* Consistent font */
+}
+
+/* The content box inside the overlay */
+#game-popup-content {
+    background-color: rgba(40, 40, 60, 0.9); /* Darker, slightly transparent background */
+    padding: 30px 50px;
+    border-radius: 12px;
+    text-align: center;
+    color: #f0f0f0; /* Light text */
+    box-shadow: 0 5px 25px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Styling for the title (e.g., "GAME OVER") */
+#game-popup-content h2 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 48px;
+    color: #ff4d4d; /* Bright red */
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+}
+
+/* Styling for the message paragraph */
+#game-popup-content p {
+    margin-top: 0;
+    margin-bottom: 30px; /* More space before button */
+    font-size: 22px;
+    color: #cccccc; /* Lighter grey */
+}
+
+/* Styling for the restart button */
+#popup-restart-button {
+    font-family: Arial, sans-serif;
+  font-size: 28px;
+  font-weight: 500;
+  color: white;
+  background-color: transparent;
+  border: 2px solid #4FD1E1;
+  border-radius: 50px;
+  padding: 15px 60px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+  box-shadow: 0 0 15px #4FD1E1, inset 0 0 10px rgba(79, 209, 225, 0.5);
+  transition: all 0.3s ease;
+  text-transform: none;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+#popup-restart-button:hover {
+    box-shadow: 0 0 25px #4FD1E1, inset 0 0 15px rgba(79, 209, 225, 0.7);
+    border-color: #5FE1F1;
+}
+
+/* Keyframes for the glowing border effect */
+@keyframes glow {
+    0% {
+        box-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #007bff, 0 0 20px #007bff;
+    }
+    50% {
+        box-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #007bff, 0 0 40px #007bff;
+    }
+    100% {
+        box-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #007bff, 0 0 20px #007bff;
+    }
+}

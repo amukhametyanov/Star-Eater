@@ -6,6 +6,7 @@ const STARTING_SIZE = 5;
 const FOLLOW_SPEED_FACTOR = 10;
 const TURN_RATE = 8.5; // Radians per second - Start here, may need fine-tuning!
 const SCREEN_DEAD_ZONE = 15; // Pixels from screen center where no turning occurs
+const STARS_NEEDED_PER_SEGMENT = 3; // Adjust this number! Higher = slower growth.
 
 export default class StarEater {
     constructor(scene, x, y) {
@@ -16,6 +17,7 @@ export default class StarEater {
 
         this.bodyParts = [];
         this.pendingGrowth = 0;
+        this.starsEatenCounter = 0;
         this.segmentSize = BODY_SPACING * 1.5;
         this.glowIntensity = 0;
         this.movementAngle = 0; // Start pointing right
@@ -49,8 +51,21 @@ export default class StarEater {
     }
 
     grow() {
-        // (Same as before)
-        this.pendingGrowth++;
+        this.starsEatenCounter++; // Increment stars eaten count
+
+        // Check if enough stars have been eaten to add a segment
+        if (this.starsEatenCounter >= STARS_NEEDED_PER_SEGMENT) {
+            this.pendingGrowth++; // Add one segment to the queue
+            this.starsEatenCounter = 0; // Reset the counter for the next segment
+            console.log(`Growth triggered! Pending segments: ${this.pendingGrowth}`);
+
+            // Optional: Trigger glow update ONLY when actually growing
+            this.updateGlow();
+        }
+        // --- <<< END MODIFICATION >>> ---
+    }
+
+    updateGlow() {
         const maxLengthForMaxGlow = 50;
         this.glowIntensity = Math.min(1, Math.sqrt(this.bodyParts.length / maxLengthForMaxGlow));
         const startColor = Phaser.Display.Color.ValueToColor(0x00ff00);
