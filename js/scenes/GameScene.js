@@ -3,8 +3,8 @@ import StarEater from '../gameObjects/StarEater.js';
 import { showPopup, hidePopup } from '../endGamePopup/PopupManager.js'; // Ensure path is correct
 
 // --- Constants ---
-const MAX_STARS = 400; // Or your desired max
-const STAR_RESPAWN_TIME = 3000;
+const MAX_STARS = 500; // Or your desired max
+const STAR_RESPAWN_TIME = 1000;
 const VACUUM_RADIUS = 60; // Adjust as needed
 const VACUUM_SPEED = 280; // Adjust as needed
 const FRAME_COLOR = 0x888888;
@@ -23,7 +23,7 @@ const STAR_VISUAL_RADIUS = 5; // Radius of the solid core (adjust for look)
 const STAR_TEXTURE_SIZE = STAR_VISUAL_RADIUS * 2 + 4; // Calculate texture size
 
 // --- Star Spacing Constants ---
-const MIN_STAR_DISTANCE = (STAR_VISUAL_RADIUS * 2) + 5; // Minimum distance between star centers
+const MIN_STAR_DISTANCE = (STAR_VISUAL_RADIUS * 2) + 20; // Minimum distance between star centers
 const MAX_SPAWN_ATTEMPTS = 20; // Max tries to find a non-overlapping spot
 
 export default class GameScene extends Phaser.Scene {
@@ -46,6 +46,7 @@ export default class GameScene extends Phaser.Scene {
     preload() {
         console.log("GameScene preload");
         this.load.image('circle', 'assets/circle.png');
+        this.load.image('star-eater-head', 'assets/star-eater-head.png');
         // Generate the star texture (Solid Core Only)
         this.makeStarTexture();
     }
