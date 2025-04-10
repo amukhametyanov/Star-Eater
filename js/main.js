@@ -12,7 +12,7 @@ const config = {
     width: window.innerWidth,
     height: window.innerHeight,
     parent: 'body',
-    backgroundColor: '#0a0a2a', // Dark sky color
+    // backgroundColor: '#0a0a2a', // Dark sky color
     physics: {
         default: 'arcade',
         arcade: {
