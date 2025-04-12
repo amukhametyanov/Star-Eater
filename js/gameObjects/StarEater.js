@@ -7,6 +7,11 @@ const FOLLOW_SPEED_FACTOR = 10; // How quickly segments follow (higher = tighter
 const TURN_RATE = 8.5; // Radians per second for head turning
 const SCREEN_DEAD_ZONE = 15;
 const STARS_NEEDED_PER_SEGMENT = 3; // How many stars add a segment
+const STARS_NEEDED_FOR_SIZE_GROWTH = 10; // How many stars needed to grow in size
+const SIZE_GROWTH_PER_LEVEL = 0.1; // Changed from 0.2 to 0.1 (10% growth)
+const MAX_SIZE_MULTIPLIER = 3.0; // Maximum size multiplier
+const SIZE_ANIMATION_DURATION = 1000; // Animation duration in milliseconds
+const SIZE_ANIMATION_EASE = 'Power2'; // Phaser easing function
 
 export default class StarEater {
     constructor(scene, x, y) {
@@ -16,16 +21,20 @@ export default class StarEater {
         this.isDead = false;
 
         this.bodyParts = [];
-        this.pendingLengthGrowth = 0; // Renamed for clarity
+        this.pendingLengthGrowth = 0;
         this.starsEatenCounter = 0;
+        this.totalStarsEaten = 0; // New counter for size growth
+        this.sizeMultiplier = 1.0; // Start at normal size
+        this.targetSizeMultiplier = 1.0; // New: target size for smooth animation
+        this.isGrowing = false; // New: track if currently animating growth
         // Base size for calculations, visual size set by setDisplaySize
         this.baseSegmentSize = BODY_SPACING * 1.5;
         this.movementAngle = 0; // Start pointing right
 
         // --- Head Creation ---
-        this.head = scene.physics.add.image(x, y, 'star-eater-head') // Ensure key matches GameScene preload
-            .setOrigin(0.5, 0.5) // Center origin is usually best
-            .setDisplaySize(this.baseSegmentSize + 20, this.baseSegmentSize + 20); // Keep explicit size
+        this.head = scene.physics.add.image(x, y, 'star-eater-head')
+            .setOrigin(0.5, 0.5)
+            .setDisplaySize(this.baseSegmentSize + 20, this.baseSegmentSize + 20);
 
         // Initialize physics body for the head
         this.updatePhysicsBody(this.head);
@@ -42,7 +51,6 @@ export default class StarEater {
         for (let i = 1; i < STARTING_SIZE; i++) {
             this.addSegment(x, y);
         }
-        // No initial glow call needed now
     }
 
     // Helper function to set physics body size
@@ -63,37 +71,69 @@ export default class StarEater {
         gameObject.body.enable = true;
     }
 
+    updateSegmentSizes() {
+        const baseSize = this.baseSegmentSize + 20;
+        const currentSize = baseSize * this.sizeMultiplier;
+        
+        this.bodyParts.forEach(segment => {
+            segment.setDisplaySize(currentSize, currentSize);
+            if (segment === this.head) {
+                this.updatePhysicsBody(segment);
+            }
+        });
+    }
+
+    startSizeAnimation(targetSize) {
+        if (this.isGrowing) return; // Don't start new animation if one is in progress
+        this.isGrowing = true;
+        this.targetSizeMultiplier = targetSize;
+
+        // Create the tween for smooth size transition
+        this.scene.tweens.add({
+            targets: this,
+            sizeMultiplier: this.targetSizeMultiplier,
+            duration: SIZE_ANIMATION_DURATION,
+            ease: SIZE_ANIMATION_EASE,
+            onUpdate: () => {
+                this.updateSegmentSizes();
+            },
+            onComplete: () => {
+                this.isGrowing = false;
+            }
+        });
+    }
 
     addSegment(x, y) {
-        // --- Use 'segment_img' key ---
-        const segment = this.scene.add.image(x, y, 'segment') // <<< USE SEGMENT IMAGE KEY
+        const baseSize = this.baseSegmentSize + 20;
+        const currentSize = baseSize * this.sizeMultiplier;
+        
+        const segment = this.scene.add.image(x, y, 'segment')
              .setOrigin(0.5, 0.5)
-             // Match display size with head for consistency, or adjust as needed
-             .setDisplaySize(this.baseSegmentSize + 20, this.baseSegmentSize + 20);
-             // No tint needed if using image colors
-
-        // Add physics body (if needed for star collision - usually not required for body segments)
-        // If you DON'T need segments to collide with stars, you can skip enabling physics on them
-        // this.scene.physics.world.enable(segment);
-        // this.updatePhysicsBody(segment);
+             .setDisplaySize(currentSize, currentSize);
 
         this.bodyParts.push(segment);
         return segment;
     }
 
-    // Simplified grow function - only handles adding segments
+    // Enhanced grow function - handles both size and length growth
     grow() {
         this.starsEatenCounter++;
+        this.totalStarsEaten++;
+        
+        // Check for size growth (every 10 stars)
+        if (this.totalStarsEaten % STARS_NEEDED_FOR_SIZE_GROWTH === 0) {
+            const newSize = Math.min(this.targetSizeMultiplier + SIZE_GROWTH_PER_LEVEL, MAX_SIZE_MULTIPLIER);
+            this.startSizeAnimation(newSize);
+            console.log(`Size growth! New multiplier: ${newSize.toFixed(2)}x`);
+        }
 
+        // Check for new segment (every 3 stars)
         if (this.starsEatenCounter >= STARS_NEEDED_PER_SEGMENT) {
             this.starsEatenCounter = 0;
             this.pendingLengthGrowth++;
             console.log(`Length growth triggered! Pending segments: ${this.pendingLengthGrowth}`);
         }
     }
-
-    // --- REMOVED updateGlow() function ---
-
 
     update(time, delta) {
         if (this.isDead) {

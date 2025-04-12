@@ -1,0 +1,13 @@
+{
+    "editor.hideCursorInOverviewRuler": true,
+    "editor.overviewRulerBorder": false,
+    "editor.hideCursorInOverviewRuler": true,
+    "editor.matchBrackets": "never",
+    "editor.renderControlCharacters": false,
+    "editor.occurringsHighlight": false,
+    "problems.decorations.enabled": false,
+    "editor.selectionHighlight": false,
+    "editor.wordHighlight": false,
+    "editor.wordHighlightStrong": false,
+    "editor.semanticHighlighting.enabled": false
+}
