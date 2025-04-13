@@ -3,7 +3,7 @@ import StarEater from '../gameObjects/StarEater.js';
 import { showPopup, hidePopup } from '../endGamePopup/PopupManager.js'; // Ensure path is correct
 
 // --- Constants ---
-const MAX_STARS = 500; // Or your desired max
+const MAX_STARS = 600; // Or your desired max
 const STAR_RESPAWN_TIME = 1000;
 const VACUUM_RADIUS = 60; // Adjust as needed
 const VACUUM_SPEED = 280; // Adjust as needed
@@ -46,7 +46,9 @@ export default class GameScene extends Phaser.Scene {
     preload() {
         console.log("GameScene preload");
         this.load.image('segment', 'assets/segment.png');
-        this.load.image('star-eater-head', 'assets/star-eater-head.png');
+        this.load.image('low-level-head', 'assets/low-level-head.png');
+        this.load.image('middle-level-head', 'assets/middle-level-head.png');
+        this.load.image('max-level-head', 'assets/max-level-head.png');
         this.load.image('background_nebula', 'assets/universe_bg_tile_nebula.png');
         // Generate the star texture (Solid Core Only)
         this.makeStarTexture();
@@ -56,15 +58,15 @@ export default class GameScene extends Phaser.Scene {
         console.log("GameScene create");
 
         // --- >>> ADD THE TILESPRITE BACKGROUND <<< ---
-    // Create a TileSprite that covers the entire world dimensions
-    // Position its center at the center of the world
-    let bg = this.add.tileSprite(
-        this.worldWidth / 2,  // Center X of the world
-        this.worldHeight / 2, // Center Y of the world
-        this.worldWidth,      // Width matching the world
-        this.worldHeight,     // Height matching the world
-        'background_nebula'   // Key of the loaded background image
-    );
+        // Create a TileSprite that covers the entire world dimensions
+        // Position its center at the center of the world
+        let bg = this.add.tileSprite(
+            this.worldWidth / 2,  // Center X of the world
+            this.worldHeight / 2, // Center Y of the world
+            this.worldWidth,      // Width matching the world
+            this.worldHeight,     // Height matching the world
+            'background_nebula'   // Key of the loaded background image
+        );
 
         // World and Physics Setup
         this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);

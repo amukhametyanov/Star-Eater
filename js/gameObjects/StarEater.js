@@ -13,6 +13,11 @@ const MAX_SIZE_MULTIPLIER = 3.0; // Maximum size multiplier
 const SIZE_ANIMATION_DURATION = 1000; // Animation duration in milliseconds
 const SIZE_ANIMATION_EASE = 'Power2'; // Phaser easing function
 
+// Head evolution constants
+const STARS_FOR_MIDDLE_HEAD = 50;
+const STARS_FOR_MAX_HEAD = 100; // Stars needed for max head
+const HEAD_CHANGE_ANIMATION_DURATION = 500;
+
 export default class StarEater {
     constructor(scene, x, y) {
         this.scene = scene;
@@ -27,12 +32,13 @@ export default class StarEater {
         this.sizeMultiplier = 1.0; // Start at normal size
         this.targetSizeMultiplier = 1.0; // New: target size for smooth animation
         this.isGrowing = false; // New: track if currently animating growth
+        this.currentHeadLevel = 'low'; // Track current head level
         // Base size for calculations, visual size set by setDisplaySize
         this.baseSegmentSize = BODY_SPACING * 1.5;
         this.movementAngle = 0; // Start pointing right
 
         // --- Head Creation ---
-        this.head = scene.physics.add.image(x, y, 'star-eater-head')
+        this.head = scene.physics.add.image(x, y, 'low-level-head') // Changed from 'star-eater-head' to 'low-level-head'
             .setOrigin(0.5, 0.5)
             .setDisplaySize(this.baseSegmentSize + 20, this.baseSegmentSize + 20);
 
@@ -115,10 +121,77 @@ export default class StarEater {
         return segment;
     }
 
+    updateHeadTexture() {
+        console.log("Test");
+        if (this.isDead) return;
+
+        let newHeadLevel = this.currentHeadLevel;
+        let newTexture = '';
+
+        console.log(`Checking head evolution - Total stars: ${this.totalStarsEaten}, Current level: ${this.currentHeadLevel}`);
+
+        if (this.totalStarsEaten >= STARS_FOR_MAX_HEAD && this.currentHeadLevel !== 'max') {
+            newHeadLevel = 'max';
+            newTexture = 'max-level-head'; // Changed to match the loaded texture key
+        } else if (this.totalStarsEaten >= STARS_FOR_MIDDLE_HEAD && this.currentHeadLevel === 'low') {
+            newHeadLevel = 'middle';
+            newTexture = 'middle-level-head'; // Changed to match the loaded texture key
+        }
+
+        if (newHeadLevel !== this.currentHeadLevel) {
+            console.log(`About to evolve head from ${this.currentHeadLevel} to ${newHeadLevel}`);
+            
+            // Store current properties
+            const currentRotation = this.head.rotation;
+            const currentX = this.head.x;
+            const currentY = this.head.y;
+            const currentSize = this.head.displayWidth;
+
+            // Create flash effect
+            this.scene.tweens.add({
+                targets: this.head,
+                alpha: 0,
+                duration: HEAD_CHANGE_ANIMATION_DURATION / 2,
+                onComplete: () => {
+                    // Change texture
+                    console.log(`Setting head texture to: ${newTexture}`);
+                    try {
+                        this.head.setTexture(newTexture);
+                    } catch (error) {
+                        console.error('Error setting texture:', error);
+                        // Try to recover by keeping current texture
+                        console.log('Available textures:', this.scene.textures.list);
+                    }
+                    
+                    // Restore properties
+                    this.head.setPosition(currentX, currentY);
+                    this.head.setRotation(currentRotation);
+                    this.head.setDisplaySize(currentSize, currentSize);
+                    this.updatePhysicsBody(this.head);
+                    
+                    // Fade back in
+                    this.scene.tweens.add({
+                        targets: this.head,
+                        alpha: 1,
+                        duration: HEAD_CHANGE_ANIMATION_DURATION / 2
+                    });
+                }
+            });
+
+            this.currentHeadLevel = newHeadLevel;
+            console.log(`Head evolved to ${newHeadLevel} level!`);
+        }
+    }
+
     // Enhanced grow function - handles both size and length growth
     grow() {
         this.starsEatenCounter++;
         this.totalStarsEaten++;
+        
+        console.log(`Stars eaten: ${this.totalStarsEaten}`); // Added debug log
+        
+        // Check for head evolution
+        this.updateHeadTexture();
         
         // Check for size growth (every 10 stars)
         if (this.totalStarsEaten % STARS_NEEDED_FOR_SIZE_GROWTH === 0) {
