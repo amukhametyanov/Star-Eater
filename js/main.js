@@ -22,8 +22,14 @@ const config = {
                 y: 0,
                 width: WORLD_WIDTH,
                 height: WORLD_HEIGHT
-            }
+            },
             // debug: true // Useful for seeing physics bodies and world bounds
+            // --- >>> ADD PHYSICS DEBUG SETTINGS HERE <<< ---
+            debug: true,            // Master switch to enable debug rendering
+            debugShowBody: true,    // Show physics bodies outlines
+            debugShowVelocity: true, // Show velocity vectors
+            debugBodyColor: 0xff00ff,     // Pink for bodies (easier to see than default)
+            debugVelocityColor: 0x00ff00, // Green for velocity vectors
         }
     },
     scene: [

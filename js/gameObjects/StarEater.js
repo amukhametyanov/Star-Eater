@@ -1,26 +1,29 @@
 // js/gameObjects/StarEater.js
 
 const HEAD_SPEED = 250;
-const BODY_SPACING = 8; // Base spacing between segment centers
+const BODY_SPACING = 8;
 const STARTING_SIZE = 5;
-const FOLLOW_SPEED_FACTOR = 10; // How quickly segments follow (higher = tighter)
-const TURN_RATE = 8.5; // Radians per second for head turning
-const SCREEN_DEAD_ZONE = 15;
-const STARS_NEEDED_PER_SEGMENT = 3; // How many stars add a segment
-const STARS_NEEDED_FOR_SIZE_GROWTH = 10; // How many stars needed to grow in size
-const SIZE_GROWTH_PER_LEVEL = 0.1; // Changed from 0.2 to 0.1 (10% growth)
-const MAX_SIZE_MULTIPLIER = 3.0; // Maximum size multiplier
-const SIZE_ANIMATION_DURATION = 1000; // Animation duration in milliseconds
-const SIZE_ANIMATION_EASE = 'Power2'; // Phaser easing function
+const FOLLOW_SPEED_FACTOR = 10;
+const TURN_RATE = 8.5;
+const STARS_NEEDED_PER_SEGMENT = 3;
+const STARS_NEEDED_FOR_SIZE_GROWTH = 10;
+const SIZE_GROWTH_PER_LEVEL = 0.1;
+const MAX_SIZE_MULTIPLIER = 3.0;
+const SIZE_ANIMATION_DURATION = 1000;
+const SIZE_ANIMATION_EASE = 'Power2';
 
-// Head evolution constants
 const STARS_FOR_MIDDLE_HEAD = 50;
-const STARS_FOR_MAX_HEAD = 100; // Stars needed for max head
+const STARS_FOR_MAX_HEAD = 100;
 const HEAD_CHANGE_ANIMATION_DURATION = 500;
 
+const HEAD_PHYSICS_RADIUS_MULTIPLIER = 5; // <-- NEW: Multiplier specifically for the HEAD (10% larger than visual)
+const SEGMENT_EXTRA_COVERAGE = 20; // <-- NEW: How much OVERLAP factor? (1.0 = just touch, 1.2 = 20% extra radius beyond half-gap)
+
 export default class StarEater {
-    constructor(scene, x, y) {
+    constructor(scene, x, y, headsGroup, bodiesGroup) {
         this.scene = scene;
+        this.headsGroup = headsGroup;
+        this.bodiesGroup = bodiesGroup;
         this.headSpeed = HEAD_SPEED;
         this.turnRate = TURN_RATE;
         this.isDead = false;
@@ -28,278 +31,244 @@ export default class StarEater {
         this.bodyParts = [];
         this.pendingLengthGrowth = 0;
         this.starsEatenCounter = 0;
-        this.totalStarsEaten = 0; // New counter for size growth
-        this.sizeMultiplier = 1.0; // Start at normal size
-        this.targetSizeMultiplier = 1.0; // New: target size for smooth animation
-        this.isGrowing = false; // New: track if currently animating growth
-        this.currentHeadLevel = 'low'; // Track current head level
-        // Base size for calculations, visual size set by setDisplaySize
+        this.totalStarsEaten = 0;
+        this.sizeMultiplier = 1.0;
+        this.targetSizeMultiplier = 1.0;
+        this.isGrowing = false;
+        this.currentHeadLevel = 'low';
         this.baseSegmentSize = BODY_SPACING * 1.5;
-        this.movementAngle = 0; // Start pointing right
+        this.movementAngle = Phaser.Math.RND.angle();
 
         // --- Head Creation ---
-        this.head = scene.physics.add.image(x, y, 'low-level-head') // Changed from 'star-eater-head' to 'low-level-head'
+        // Calculate initial head visual size based on base segment size + extra
+        const initialHeadVisualSize = (this.baseSegmentSize + 20) * this.sizeMultiplier; // Use initial multiplier
+        this.head = scene.physics.add.image(x, y, 'low-level-head')
             .setOrigin(0.5, 0.5)
-            .setDisplaySize(this.baseSegmentSize + 20, this.baseSegmentSize + 20);
+            .setDisplaySize(initialHeadVisualSize, initialHeadVisualSize);
 
-        // Initialize physics body for the head
-        this.updatePhysicsBody(this.head);
+        this.head.parentStarEater = this;
+
+        // Initialize physics body for the HEAD using the multiplier method
+        this.updatePhysicsBody(this.head); // Pass the head object
 
         if (this.head.body) {
              this.head.body.setCollideWorldBounds(true);
              this.head.body.setBounce(0);
              this.head.body.onWorldBounds = true;
+             // console.log(`Head physics: collideWorldBounds=true, onWorldBounds=true`);
         } else { console.error("StarEater head failed to get a physics body!"); }
+
+        if (this.headsGroup) { this.headsGroup.add(this.head); }
+        else { console.warn("StarEater created without a headsGroup!"); }
+
 
         this.bodyParts.push(this.head);
 
         // --- Initial Body Segments ---
         for (let i = 1; i < STARTING_SIZE; i++) {
-            this.addSegment(x, y);
+            // Pass head's initial position, segments will snap during first updates
+            this.addSegment(this.head.x, this.head.y);
+        }
+
+        // World Bounds Collision Listener Setup (handled by scene event)
+    }
+
+    handleBoundaryCollision() {
+        console.log(`${this.constructor.name} executing handleBoundaryCollision. Emitting event.`);
+        if (!this.isDead) {
+            this.scene.events.emit('starEaterHitBoundary', this);
+        } else {
+            console.log(`${this.constructor.name} hit boundary but was already dead.`);
         }
     }
 
-    // Helper function to set physics body size
+    // --- MODIFIED: updatePhysicsBody uses gap-filling for segments ---
     updatePhysicsBody(gameObject) {
-        if (!gameObject || !gameObject.texture?.source?.[0]) return;
+        if (!gameObject || !gameObject.texture?.source?.[0] || !this.scene) return;
         if (!gameObject.body) this.scene.physics.world.enable(gameObject);
-        if (!gameObject.body) return;
+        if (!gameObject.body) { console.error("Failed to enable physics body for", gameObject.texture?.key); return; }
 
-        // Use DISPLAYED size for body calculation if setDisplaySize is used
-        const bodyRadius = (gameObject.displayWidth / 2) * 0.8; // 80% of half the DISPLAYED width
+        let bodyRadius = 0;
+
+        // --- Apply specific logic based on type ---
+        if (gameObject === this.head) {
+            // HEAD: Use the simple visual multiplier
+            bodyRadius = (gameObject.displayWidth / 2) * HEAD_PHYSICS_RADIUS_MULTIPLIER;
+            // console.log(`Updating HEAD physics. Visual: ${gameObject.displayWidth.toFixed(1)}, Radius: ${bodyRadius.toFixed(1)}`);
+        } else {
+            // SEGMENT: Calculate radius to cover half the gap + extra coverage
+            // 1. Visual radius of the segment itself
+            const visualRadius = gameObject.displayWidth / 2;
+            // 2. Half the distance to the next segment center (use current sizeMultiplier)
+            const halfGapSize = (BODY_SPACING * this.sizeMultiplier) / 2;
+            // 3. Base radius needed to reach halfway into the gap
+            const baseRadiusToFillGap = visualRadius + halfGapSize;
+            // 4. Apply extra coverage multiplier for sensitivity and overlap assurance
+            bodyRadius = baseRadiusToFillGap * SEGMENT_EXTRA_COVERAGE; // Use the new constant
+
+            // console.log(`Updating SEGMENT physics. Visual: ${gameObject.displayWidth.toFixed(1)}, HalfGap: ${halfGapSize.toFixed(1)}, BaseRadius: ${baseRadiusToFillGap.toFixed(1)}, FinalRadius: ${bodyRadius.toFixed(1)}`);
+        }
+
+        // Ensure radius is at least a minimum value (e.g., 1 pixel) to avoid issues
+        bodyRadius = Math.max(1, bodyRadius);
 
         gameObject.body.setCircle(bodyRadius);
-        // Offset based on original texture dimensions to center circle correctly
+
+        // Offset calculation logic remains the same
+        const textureWidth = gameObject.texture.source[0].width;
+        const textureHeight = gameObject.texture.source[0].height;
         gameObject.body.setOffset(
-            gameObject.texture.source[0].width / 2 - bodyRadius,
-            gameObject.texture.source[0].height / 2 - bodyRadius
-        );
+             textureWidth / 2 - bodyRadius,
+             textureHeight / 2 - bodyRadius
+         );
+
         gameObject.body.enable = true;
     }
 
     updateSegmentSizes() {
-        const baseSize = this.baseSegmentSize + 20;
-        const currentSize = baseSize * this.sizeMultiplier;
-        
+        const baseVisualSegmentSize = this.baseSegmentSize + 20; // Use baseSegmentSize for consistency
+        const currentVisualSize = baseVisualSegmentSize * this.sizeMultiplier;
+
         this.bodyParts.forEach(segment => {
-            segment.setDisplaySize(currentSize, currentSize);
-            if (segment === this.head) {
-                this.updatePhysicsBody(segment);
-            }
+            if (!segment || !segment.active) return;
+            segment.setDisplaySize(currentVisualSize, currentVisualSize);
+            this.updatePhysicsBody(segment); // This now applies the correct logic
         });
     }
 
+
     startSizeAnimation(targetSize) {
-        if (this.isGrowing) return; // Don't start new animation if one is in progress
+        if (this.isGrowing) return;
         this.isGrowing = true;
         this.targetSizeMultiplier = targetSize;
 
-        // Create the tween for smooth size transition
         this.scene.tweens.add({
             targets: this,
             sizeMultiplier: this.targetSizeMultiplier,
             duration: SIZE_ANIMATION_DURATION,
             ease: SIZE_ANIMATION_EASE,
             onUpdate: () => {
+                // Update visual size AND physics body size during the animation
                 this.updateSegmentSizes();
             },
             onComplete: () => {
                 this.isGrowing = false;
+                 // Ensure final size is set correctly after animation
+                 this.updateSegmentSizes();
             }
         });
     }
 
     addSegment(x, y) {
-        const baseSize = this.baseSegmentSize + 20;
-        const currentSize = baseSize * this.sizeMultiplier;
-        
+        const baseVisualSegmentSize = this.baseSegmentSize + 20; // Use baseSegmentSize
+        const currentVisualSize = baseVisualSegmentSize * this.sizeMultiplier;
+
         const segment = this.scene.add.image(x, y, 'segment')
              .setOrigin(0.5, 0.5)
-             .setDisplaySize(currentSize, currentSize);
+             .setDisplaySize(currentVisualSize, currentVisualSize);
 
+        segment.parentStarEater = this;
         this.bodyParts.push(segment);
+
+        if (this.bodiesGroup) {
+            this.scene.physics.world.enable(segment);
+            if (segment.body) {
+                this.updatePhysicsBody(segment); // Correctly sets radius/offset using the gap-filling logic
+                segment.body.allowGravity = false;
+                segment.body.immovable = true;
+                this.bodiesGroup.add(segment);
+            } else { console.error("Failed to enable physics body for segment!"); }
+        } else { console.warn("StarEater segment added without a bodiesGroup!"); }
         return segment;
     }
 
     updateHeadTexture() {
-        console.log("Test");
         if (this.isDead) return;
-
         let newHeadLevel = this.currentHeadLevel;
         let newTexture = '';
-
-        console.log(`Checking head evolution - Total stars: ${this.totalStarsEaten}, Current level: ${this.currentHeadLevel}`);
-
         if (this.totalStarsEaten >= STARS_FOR_MAX_HEAD && this.currentHeadLevel !== 'max') {
-            newHeadLevel = 'max';
-            newTexture = 'max-level-head'; // Changed to match the loaded texture key
+            newHeadLevel = 'max'; newTexture = 'max-level-head';
         } else if (this.totalStarsEaten >= STARS_FOR_MIDDLE_HEAD && this.currentHeadLevel === 'low') {
-            newHeadLevel = 'middle';
-            newTexture = 'middle-level-head'; // Changed to match the loaded texture key
+            newHeadLevel = 'middle'; newTexture = 'middle-level-head';
         }
-
         if (newHeadLevel !== this.currentHeadLevel) {
             console.log(`About to evolve head from ${this.currentHeadLevel} to ${newHeadLevel}`);
-            
-            // Store current properties
-            const currentRotation = this.head.rotation;
-            const currentX = this.head.x;
-            const currentY = this.head.y;
-            const currentSize = this.head.displayWidth;
-
-            // Create flash effect
-            this.scene.tweens.add({
-                targets: this.head,
-                alpha: 0,
-                duration: HEAD_CHANGE_ANIMATION_DURATION / 2,
+            const currentRotation = this.head.rotation; const currentX = this.head.x; const currentY = this.head.y;
+            const currentSize = this.head.displayWidth; // Use displayWidth
+            this.scene.tweens.add({ targets: this.head, alpha: 0, duration: HEAD_CHANGE_ANIMATION_DURATION / 2,
                 onComplete: () => {
-                    // Change texture
-                    console.log(`Setting head texture to: ${newTexture}`);
-                    try {
-                        this.head.setTexture(newTexture);
-                    } catch (error) {
-                        console.error('Error setting texture:', error);
-                        // Try to recover by keeping current texture
-                        console.log('Available textures:', this.scene.textures.list);
-                    }
-                    
-                    // Restore properties
-                    this.head.setPosition(currentX, currentY);
-                    this.head.setRotation(currentRotation);
-                    this.head.setDisplaySize(currentSize, currentSize);
-                    this.updatePhysicsBody(this.head);
-                    
-                    // Fade back in
-                    this.scene.tweens.add({
-                        targets: this.head,
-                        alpha: 1,
-                        duration: HEAD_CHANGE_ANIMATION_DURATION / 2
-                    });
+                    try { this.head.setTexture(newTexture); } catch (error) { console.error('Error setting texture:', error); }
+                    this.head.setPosition(currentX, currentY); this.head.setRotation(currentRotation);
+                    this.head.setDisplaySize(currentSize, currentSize); // Restore visual size
+                    this.updatePhysicsBody(this.head); // IMPORTANT: Update physics body AFTER texture/size change
+                    this.scene.tweens.add({ targets: this.head, alpha: 1, duration: HEAD_CHANGE_ANIMATION_DURATION / 2 });
                 }
             });
-
             this.currentHeadLevel = newHeadLevel;
             console.log(`Head evolved to ${newHeadLevel} level!`);
         }
     }
 
-    // Enhanced grow function - handles both size and length growth
     grow() {
-        this.starsEatenCounter++;
-        this.totalStarsEaten++;
-        
-        console.log(`Stars eaten: ${this.totalStarsEaten}`); // Added debug log
-        
-        // Check for head evolution
+        this.starsEatenCounter++; this.totalStarsEaten++;
         this.updateHeadTexture();
-        
-        // Check for size growth (every 10 stars)
-        if (this.totalStarsEaten % STARS_NEEDED_FOR_SIZE_GROWTH === 0) {
-            const newSize = Math.min(this.targetSizeMultiplier + SIZE_GROWTH_PER_LEVEL, MAX_SIZE_MULTIPLIER);
-            this.startSizeAnimation(newSize);
-            console.log(`Size growth! New multiplier: ${newSize.toFixed(2)}x`);
+        if (this.totalStarsEaten > 0 && this.totalStarsEaten % STARS_NEEDED_FOR_SIZE_GROWTH === 0) {
+            const newTargetSize = Math.min(this.targetSizeMultiplier + SIZE_GROWTH_PER_LEVEL, MAX_SIZE_MULTIPLIER);
+            if (newTargetSize > this.targetSizeMultiplier) { this.startSizeAnimation(newTargetSize); console.log(`Size growth triggered! New target multiplier: ${newTargetSize.toFixed(2)}x`); }
         }
-
-        // Check for new segment (every 3 stars)
-        if (this.starsEatenCounter >= STARS_NEEDED_PER_SEGMENT) {
-            this.starsEatenCounter = 0;
-            this.pendingLengthGrowth++;
-            console.log(`Length growth triggered! Pending segments: ${this.pendingLengthGrowth}`);
-        }
+        if (this.starsEatenCounter >= STARS_NEEDED_PER_SEGMENT) { this.starsEatenCounter = 0; this.pendingLengthGrowth++; }
     }
 
     update(time, delta) {
-        if (this.isDead) {
-            return;
-        }
-
+        if (this.isDead) { return; }
         const deltaSec = delta / 1000;
-
-        // --- Add new segment if pending ---
         if (this.pendingLengthGrowth > 0) {
             const tail = this.bodyParts[this.bodyParts.length - 1];
-             if (tail) {
-                  this.addSegment(tail.x, tail.y);
-                  this.pendingLengthGrowth--;
-             } else {
-                 console.warn("Cannot add segment, tail does not exist.");
-                 this.pendingLengthGrowth = 0;
-             }
+             if (tail && tail.active) { this.addSegment(tail.x, tail.y); this.pendingLengthGrowth--; }
+             else if (this.bodyParts.length > 0 && this.bodyParts[0].active) { this.addSegment(this.head.x, this.head.y); this.pendingLengthGrowth--; console.warn("Added segment near head as tail missing/inactive."); }
+             else { console.warn("Cannot add segment, tail/head missing or inactive."); this.pendingLengthGrowth = 0; }
         }
-
-        // --- Head Steering ---
-        const pointer = this.scene.input.activePointer;
-        const screenCenterX = this.scene.scale.width / 2;
-        const screenCenterY = this.scene.scale.height / 2;
-        const cursorScreenX = pointer.x;
-        const cursorScreenY = pointer.y;
-        const distFromCenter = Phaser.Math.Distance.Between(screenCenterX, screenCenterY, cursorScreenX, cursorScreenY);
-
-        if (distFromCenter > SCREEN_DEAD_ZONE) {
-            const targetAngle = Phaser.Math.Angle.Between(screenCenterX, screenCenterY, cursorScreenX, cursorScreenY);
-            this.movementAngle = Phaser.Math.Angle.RotateTo(this.movementAngle, targetAngle, this.turnRate * deltaSec);
-        }
-
-        // Apply velocity (check if body exists)
-        if (this.head.body) {
-             this.scene.physics.velocityFromRotation(this.movementAngle, this.headSpeed, this.head.body.velocity);
-        }
-
-        // --- Head Rotation ---
-        // Assuming head image points UP, add PI/2 offset
+        if (this.head.body) { this.scene.physics.velocityFromRotation(this.movementAngle, this.headSpeed, this.head.body.velocity); }
         this.head.rotation = this.movementAngle - Math.PI / 2;
-
-
-        // --- Body Segment Following ---
-        // Use base spacing, as scale isn't changing now
-        const effectiveBodySpacing = BODY_SPACING;
+        const effectiveBodySpacing = BODY_SPACING * this.sizeMultiplier;
         for (let i = 1; i < this.bodyParts.length; i++) {
-            const currentSegment = this.bodyParts[i];
-            const targetSegment = this.bodyParts[i - 1];
-             if (!currentSegment || !targetSegment) continue; // Safety check
-
+            const currentSegment = this.bodyParts[i]; const targetSegment = this.bodyParts[i - 1];
+             if (!currentSegment || !currentSegment.active || !targetSegment || !targetSegment.active) continue;
             const angleToTarget = Phaser.Math.Angle.Between(currentSegment.x, currentSegment.y, targetSegment.x, targetSegment.y);
-
-            // Update Position (same as before)
             const targetPosX = targetSegment.x - Math.cos(angleToTarget) * effectiveBodySpacing;
             const targetPosY = targetSegment.y - Math.sin(angleToTarget) * effectiveBodySpacing;
-            const moveX = targetPosX - currentSegment.x;
-            const moveY = targetPosY - currentSegment.y;
-            currentSegment.x += moveX * FOLLOW_SPEED_FACTOR * deltaSec;
-            currentSegment.y += moveY * FOLLOW_SPEED_FACTOR * deltaSec;
-
-            // --- <<< ADD SEGMENT ROTATION >>> ---
-            // Set the rotation of the current segment to point towards the target segment.
-            // Add the same PI/2 offset if your segment.png also points UP.
-            // If segment.png points RIGHT, remove the "+ Math.PI / 2".
-            currentSegment.rotation = angleToTarget + Math.PI / 2; // <<< Adjust offset if needed
-            // --- <<< END SEGMENT ROTATION >>> ---
+            const moveX = targetPosX - currentSegment.x; const moveY = targetPosY - currentSegment.y;
+            currentSegment.x += moveX * FOLLOW_SPEED_FACTOR * deltaSec; currentSegment.y += moveY * FOLLOW_SPEED_FACTOR * deltaSec;
+            currentSegment.rotation = angleToTarget + Math.PI / 2;
         }
+    }
 
-        // --- World Bounds Collision Check ---
-        if (this.head.body?.blocked.left || this.head.body?.blocked.right || this.head.body?.blocked.up || this.head.body?.blocked.down) {
-             if (!this.isDead) {
-                 this.scene.gameOver(this);
-             }
-        }
+    setTargetAngle(angle) {
+        const deltaSec = this.scene.game.loop.delta / 1000 || 1 / 60;
+        this.movementAngle = Phaser.Math.Angle.RotateTo(this.movementAngle, angle, this.turnRate * deltaSec);
     }
 
     markAsDead() {
-        this.isDead = true;
-        if (this.head.body) {
-            this.head.body.setVelocity(0, 0);
-        }
-        console.log("StarEater marked as dead.");
+        if (this.isDead) return; this.isDead = true;
+        console.log(`StarEater ${this.constructor.name} marked as dead.`);
+        if (this.head.body) { this.head.body.enable = false; this.head.body.setVelocity(0, 0); }
+        this.bodyParts.forEach(part => {
+             if (part && part.active) { part.setTint(0xff0000); if(part.body) part.body.enable = false; }
+        });
     }
 
-    getBodySegments() {
-        return this.bodyParts.slice(1);
-    }
+    getBodySegments() { return this.bodyParts.slice(1).filter(part => part && part.active); }
 
-     destroy() {
-        console.log("Destroying StarEater...");
-        this.bodyParts.forEach(part => part?.destroy());
+    destroy(explode = false) {
+        console.log(`Destroying StarEater ${this.constructor.name}... Explode: ${explode}`); this.isDead = true;
+        const segmentPositions = []; if (explode) { this.bodyParts.forEach(segment => { if (segment && segment.active) { segmentPositions.push({ x: segment.x, y: segment.y }); } }); }
+        this.bodyParts.forEach(part => {
+            if (!part) return; if (part.body) { part.body.enable = false; }
+            if (part === this.head && this.headsGroup) { this.headsGroup.remove(part, true, true); }
+            else if (part !== this.head && this.bodiesGroup) { this.bodiesGroup.remove(part, true, true); }
+            else { if (part.active) { part.destroy(); } }
+        });
         this.bodyParts = [];
-        this.scene = null;
+        return explode ? segmentPositions : null;
     }
 }
