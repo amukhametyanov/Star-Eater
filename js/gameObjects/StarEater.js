@@ -57,17 +57,39 @@ export default class StarEater {
         for (let i = 1; i < STARTING_SIZE; i++) {
             this.addSegment(x, y);
         }
+
+         // Initial size update for all segments based on starting sizeMultiplier
+         this.updateSegmentSizes(); // Important to call this AFTER initial segments are added
     }
 
     // Helper function to set physics body size
     updatePhysicsBody(gameObject) {
         if (!gameObject || !gameObject.texture?.source?.[0]) return;
         if (!gameObject.body) this.scene.physics.world.enable(gameObject);
-        if (!gameObject.body) return;
+        if (!gameObject.body) {
+            console.warn("Failed to enable physics body for", gameObject);
+            return;
+        } 
 
+        let baseRadiusMultiplier;
+        let finalRadiusMultiplier;
+
+        if (gameObject === this.head) {
+            baseRadiusMultiplier = 6.0; // Head is larger
+        } else {
+            if(this.sizeMultiplier > 2.0) {
+                baseRadiusMultiplier = 10.0; // Segments are smaller
+            } else {
+                baseRadiusMultiplier = 15.0; // Segments are smaller
+            }
+        }
+
+
+        let sizeReductionFactor = (this.sizeMultiplier - 1.0) * 0.1;
+        finalRadiusMultiplier = Math.max(0.5, baseRadiusMultiplier - sizeReductionFactor); // Ensure multiplier doesn't go below 0.5
         
         // Use for physical collision detection area size
-        const bodyRadius = (gameObject.displayWidth / 2) * 6; // 80% of half the DISPLAYED width
+        const bodyRadius = (gameObject.displayWidth / 2) * finalRadiusMultiplier;
 
         gameObject.body.setCircle(bodyRadius);
         // Offset based on original texture dimensions to center circle correctly
@@ -84,8 +106,13 @@ export default class StarEater {
         
         this.bodyParts.forEach(segment => {
             segment.setDisplaySize(currentSize, currentSize);
-            if (segment === this.head) {
+            // if (segment === this.head) {
+            //     this.updatePhysicsBody(segment);
+            // }
+            if (segment.body) { // <<< CHANGED: Update physics for ALL segments with bodies
                 this.updatePhysicsBody(segment);
+            } else if (segment !== this.head) { // Don't warn for the head if it fails initially (handled in constructor)
+                console.warn("Attempted to update size for a segment without a physics body.", segment);
             }
         });
     }
@@ -101,7 +128,8 @@ export default class StarEater {
             sizeMultiplier: this.targetSizeMultiplier,
             duration: SIZE_ANIMATION_DURATION,
             ease: SIZE_ANIMATION_EASE,
-            onUpdate: () => {
+            onUpdate: (tween, target) => {
+                console.log(`Growth progress: ${target.sizeMultiplier.toFixed(1)}`);
                 this.updateSegmentSizes();
             },
             onComplete: () => {
@@ -115,8 +143,27 @@ export default class StarEater {
         const currentSize = baseSize * this.sizeMultiplier;
         
         const segment = this.scene.add.image(x, y, 'segment')
-             .setOrigin(0.5, 0.5)
-             .setDisplaySize(currentSize, currentSize);
+             .setOrigin(0.5, 0.5);
+            //  .setDisplaySize(currentSize, currentSize);
+        // Set initial display size (BEFORE enabling physics)
+        segment.setDisplaySize(currentSize, currentSize);
+
+        // --- PHYSICS ADDED FOR SEGMENTS ---
+        // 1. Enable physics for the new segment
+        this.scene.physics.world.enable(segment);
+
+        // 2. Configure the physics body using the helper function
+        if (segment.body) {
+            this.updatePhysicsBody(segment);
+            // Optional: Disable gravity if you're in an Arcade Physics world with gravity
+            // segment.body.setAllowGravity(false);
+            // Optional: Set other physics properties if needed (e.g., immovable, bounce)
+            // segment.body.setImmovable(true); // Segments usually shouldn't be pushed around easily
+            segment.body.setBounce(0);
+        } else {
+            console.error("Failed to create physics body for new segment!");
+        }
+        // --- END PHYSICS ADDED ---
 
         this.bodyParts.push(segment);
         return segment;
