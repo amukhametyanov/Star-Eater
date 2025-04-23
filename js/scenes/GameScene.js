@@ -1,183 +1,270 @@
 // js/scenes/GameScene.js
 import StarEater from '../gameObjects/StarEater.js';
+import BotController from '../ai/BotController.js'; // ---> IMPORT BOT CONTROLLER
 import { showPopup, hidePopup } from '../endGamePopup/PopupManager.js'; // Ensure path is correct
 
 // --- Constants ---
-const MAX_STARS = 600; // Or your desired max
+const MAX_STARS = 600;
 const STAR_RESPAWN_TIME = 1000;
-const VACUUM_RADIUS = 60; // Adjust as needed
-const VACUUM_SPEED = 280; // Adjust as needed
+const VACUUM_RADIUS = 60;
+const VACUUM_SPEED = 280;
 const FRAME_COLOR = 0x888888;
 const FRAME_THICKNESS = 5;
-const BODY_EAT_DISTANCE_THRESHOLD = 12; // Adjust based on STAR_VISUAL_RADIUS
+const BODY_EAT_DISTANCE_THRESHOLD = 12;
 
 // --- Star Appearance Constants ---
 const STAR_COLORS = [
-    0xff4d4d, // Red
-    0x87cefa, // Light Blue
-    0xffff00, // Yellow
-    0xfffacd, // Light Yellow
-    0xffffff  // White
+    0xff4d4d, 0x87cefa, 0xffff00, 0xfffacd, 0xffffff
 ];
-const STAR_VISUAL_RADIUS = 5; // Radius of the solid core (adjust for look)
-const STAR_TEXTURE_SIZE = STAR_VISUAL_RADIUS * 2 + 4; // Calculate texture size
+const STAR_VISUAL_RADIUS = 5;
+const STAR_TEXTURE_SIZE = STAR_VISUAL_RADIUS * 2 + 4;
 
 // --- Star Spacing Constants ---
-const MIN_STAR_DISTANCE = (STAR_VISUAL_RADIUS * 2) + 20; // Minimum distance between star centers
-const MAX_SPAWN_ATTEMPTS = 20; // Max tries to find a non-overlapping spot
+const MIN_STAR_DISTANCE = (STAR_VISUAL_RADIUS * 2) + 20;
+const MAX_SPAWN_ATTEMPTS = 20;
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
         super({ key: 'GameScene' });
 
-        this.starEater = null;
-        this.stars = null;
+        this.starEater = null;        // Player's StarEater instance
+        this.botController = null;    // Controller for the AI bot
+        this.playerBodyGroup = null;  // Physics group for Player's body segments ONLY
+        this.stars = null;            // Physics group for stars
         this.worldWidth = 0;
         this.worldHeight = 0;
         this.boundaryFrame = null;
+        this.gameOverActive = false; // Flag to prevent duplicate game over triggers
     }
 
     init(data) {
         this.worldWidth = data.worldWidth || 5000;
         this.worldHeight = data.worldHeight || 5000;
+        this.gameOverActive = false; // Reset flag on scene start/restart
         console.log(`GameScene initialized with world: ${this.worldWidth}x${this.worldHeight}`);
     }
 
     preload() {
         console.log("GameScene preload");
+        // Load common assets
         this.load.image('segment', 'assets/segment.png');
         this.load.image('low-level-head', 'assets/low-level-head.png');
         this.load.image('middle-level-head', 'assets/middle-level-head.png');
         this.load.image('max-level-head', 'assets/max-level-head.png');
         this.load.image('background_nebula', 'assets/universe_bg_tile_nebula.png');
-        // Generate the star texture (Solid Core Only)
+        // Generate the star texture
         this.makeStarTexture();
     }
 
     create() {
         console.log("GameScene create");
+        this.gameOverActive = false; // Ensure flag is reset
 
-        // --- >>> ADD THE TILESPRITE BACKGROUND <<< ---
-        // Create a TileSprite that covers the entire world dimensions
-        // Position its center at the center of the world
-        let bg = this.add.tileSprite(
-            this.worldWidth / 2,  // Center X of the world
-            this.worldHeight / 2, // Center Y of the world
-            this.worldWidth,      // Width matching the world
-            this.worldHeight,     // Height matching the world
-            'background_nebula'   // Key of the loaded background image
+        // --- Background, World, Frame ---
+        this.add.tileSprite(
+            this.worldWidth / 2, this.worldHeight / 2,
+            this.worldWidth, this.worldHeight,
+            'background_nebula'
         );
-
-        // World and Physics Setup
         this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
-
-        // Draw Visual Boundary Frame
         this.drawBoundaryFrame();
+        // --- End Background ---
 
-        // Create Star Eater
-        this.starEater = new StarEater(this, this.worldWidth / 2, this.worldHeight / 2);
+        // --- Create Player Star Eater ---
+        // Start player somewhat off-center to make space
+        const playerStartX = this.worldWidth / 3;
+        const playerStartY = this.worldHeight / 2;
+        // Pass 'player' identifier
+        this.starEater = new StarEater(this, playerStartX, playerStartY, 'player');
 
-        // Camera Follow
+        // --- Create Player Body Segment Group ---
+        // This group is used for collision checks (e.g., bot head hitting player body)
+        this.playerBodyGroup = this.physics.add.group();
+        this.updatePlayerBodyGroup(); // Populate initially
+
+        // --- Camera Follow Player ---
         this.cameras.main.startFollow(this.starEater.head, true, 0.08, 0.08);
 
-        // Create Stars Group
+        // --- Create Stars Group ---
         this.stars = this.physics.add.group({
             key: 'star', // Texture key from makeStarTexture
             maxSize: MAX_STARS,
-            runChildUpdate: false // We manually update stars in the scene's update
+            runChildUpdate: false // Manual star updates
         });
-
-        // Spawn initial stars (using the non-overlapping logic)
+        // Spawn initial stars with overlap avoidance
         for (let i = 0; i < MAX_STARS; i++) {
             this.spawnStar();
         }
+        // --- End Stars Group ---
 
-        // Setup Physics Collisions (Head eating)
+        // --- Create Bot Controller and Bot ---
+        this.botController = new BotController(this, this.starEater, this.stars);
+        // Start bot on the other side
+        const botStartX = this.worldWidth * (2 / 3);
+        const botStartY = this.worldHeight / 2;
+        // The controller creates the bot's StarEater instance internally
+        this.botController.createBot(botStartX, botStartY);
+        // --- End Bot Creation ---
+
+
+        // --- Setup Physics Collisions ---
+        console.log("Setting up physics overlaps...");
+
+        // 1. Player Head vs Stars
         this.physics.add.overlap(
             this.starEater.head,
             this.stars,
-            this.eatStar, // Callback for head overlap
-            null,
-            this
+            this.handleEatStar, // Use scene's handler
+            (playerHead, star) => star?.active && this.starEater && !this.starEater.isDead, // Process check
+            this // Context
         );
+
+        // 2. Player Head vs Bot Body Segments -> BOT DIES
+        const botBodyGroup = this.botController?.getBotBodyGroup(); // Safely get bot group
+        if (this.starEater?.head && botBodyGroup) {
+            this.physics.add.overlap(
+                this.starEater.head,
+                botBodyGroup,
+                this.handlePlayerHitBotBody, // Callback defined below
+                (playerHead, botSegment) => { // Process check: ensures both alive, segment is body
+                    return botSegment?.active && !botSegment.getData('isHead') &&
+                           this.starEater && !this.starEater.isDead &&
+                           this.botController?.getBotInstance() && !this.botController.getBotInstance().isDead;
+                },
+                this // Context
+            );
+            console.log("Overlap: PlayerHead <-> BotBody setup OK.");
+        } else {
+             console.warn("Overlap setup FAILED: PlayerHead <-> BotBody (Missing player head or bot body group).");
+        }
+
+        // 3. Bot collisions (Bot Head vs Stars, Bot Head vs Player Body)
+        //    These are set up internally by BotController._setupBotCollisions() when createBot is called.
+        //    Bot Head vs Player Body -> PLAYER DIES (handled by BotController._handleHitPlayerBody calling killStarEater)
+
+        // --- End Physics Collisions ---
+
+        console.log("GameScene create complete.");
     } // End create()
 
+
     update(time, delta) {
-        // --- Update Star Eater ---
+        // --- Update Player ---
         if (this.starEater && !this.starEater.isDead) {
             this.starEater.update(time, delta);
+            // Player body group updates are handled after growth in StarEater.update
         }
 
-        // --- Star Vacuum & Body Eating Logic ---
+        // --- Update Bot Controller ---
+        if (this.botController) {
+            this.botController.update(time, delta);
+             // Bot body group updates are handled after growth in StarEater.update
+        }
+
+        // --- Star Logic (Vacuum + Player Body Eating) ---
         if (this.stars) {
-            // Get player details safely, handling null/dead states
-            const eaterAlive = this.starEater && !this.starEater.isDead;
-            const headX = eaterAlive ? this.starEater.head.x : 0;
-            const headY = eaterAlive ? this.starEater.head.y : 0;
-            const bodyParts = eaterAlive ? this.starEater.bodyParts : [];
+            // Get current state of player and bot for efficiency
+            const playerAlive = this.starEater && !this.starEater.isDead;
+            const playerHead = playerAlive ? this.starEater.head : null;
+            const playerBodyParts = playerAlive ? this.starEater.bodyParts : [];
+
+            const botInstance = this.botController?.getBotInstance(); // Safely get bot
+            const botAlive = botInstance && !botInstance.isDead;
+            const botHead = botAlive ? botInstance.head : null;
+            // --- End Get State ---
 
             this.stars.children.iterate(star => {
-                // Skip inactive or invalid stars immediately
-                if (!star || !star.active) {
-                    return true; // Continue to next star in iteration
+                // Skip inactive stars or stars missing a physics body
+                if (!star || !star.active || !star.body) {
+                    // Safety check: ensure non-body stars don't have velocity
+                     if(star && !star.body && star.velocity && (star.velocity.x !== 0 || star.velocity.y !== 0)) {
+                         if(typeof star.setVelocity === 'function') star.setVelocity(0,0);
+                     }
+                    return true; // Continue to next star
                 }
 
-                // --- Physics Interactions (Vacuum & Eating - only if player is alive) ---
-                if (eaterAlive && star.body) {
-                    const starX = star.x;
-                    const starY = star.y;
-                    let eaten = false; // Flag to prevent processing after eating
+                const starX = star.x;
+                const starY = star.y;
+                let stopVelocity = true; // Assume we stop the star unless vacuumed/eaten
 
-                    // Vacuum Check
-                    const distanceToHead = Phaser.Math.Distance.Between(starX, starY, headX, headY);
-                    if (distanceToHead < VACUUM_RADIUS) {
-                        const angle = Phaser.Math.Angle.Between(starX, starY, headX, headY);
-                        this.physics.velocityFromRotation(angle, VACUUM_SPEED, star.body.velocity);
-                    } else {
-                        // Stop vacuum movement if outside radius
-                        if (star.body.velocity.x !== 0 || star.body.velocity.y !== 0) {
-                            star.body.setVelocity(0, 0);
-                        }
+                // --- Combined Vacuum Logic ---  // <- Update Section Start
+                let distSqPlayer = Infinity;
+                let distSqBot = Infinity;
+                let vacuumTarget = null; // Head to vacuum towards (null if none)
+                const minDistSq = VACUUM_RADIUS * VACUUM_RADIUS; // Squared radius
+
+                // Calculate distance to player if alive
+                if (playerHead) {
+                    distSqPlayer = Phaser.Math.Distance.Squared(starX, starY, playerHead.x, playerHead.y);
+                }
+                // Calculate distance to bot if alive
+                if (botHead) {                       // <- Update (Check if bot is valid)
+                    distSqBot = Phaser.Math.Distance.Squared(starX, starY, botHead.x, botHead.y); // <- Update (Calculate distance to bot)
+                }
+
+                // Check if star is within vacuum range of EITHER eater
+                if (distSqPlayer < minDistSq || distSqBot < minDistSq) { // <- Update (Check both distances)
+                    // Determine which is closer
+                    if (distSqPlayer <= distSqBot) { // Player is closer or same distance
+                        vacuumTarget = playerHead;
+                    } else { // Bot is closer         // <- Update (Select bot head)
+                        vacuumTarget = botHead;       // <- Update (Assign bot head)
                     }
+                }
 
-                    // Body Segment Eating Check
-                    for (let i = 1; i < bodyParts.length; i++) {
-                        const segment = bodyParts[i];
-                        if (!segment) continue; // Should not happen, but safety check
+                // Apply vacuum velocity if a target was found
+                if (vacuumTarget) {                   // <- Update (Will be true if botHead selected)
+                    const angle = Phaser.Math.Angle.Between(starX, starY, vacuumTarget.x, vacuumTarget.y);
+                    // Apply velocity to the star's body towards the target head
+                    this.physics.velocityFromRotation(angle, VACUUM_SPEED, star.body.velocity); // <- Update (Applies velocity towards bot if bot is target)
+                    stopVelocity = false; // Don't stop velocity if vacuuming
+                }
+                // --- End Combined Vacuum Logic --- // <- Update Section End
+
+
+                // --- Player Body Segment Eating Check (Keep As Is - Only player does this) ---
+                let eatenByPlayerBody = false;
+                if (playerAlive) {
+                    for (let i = 1; i < playerBodyParts.length; i++) {
+                        const segment = playerBodyParts[i];
+                        if (!segment || !segment.active) continue;
 
                         const distanceToSegment = Phaser.Math.Distance.Between(starX, starY, segment.x, segment.y);
-                        if (distanceToSegment < BODY_EAT_DISTANCE_THRESHOLD) {
-                            // console.log(`Star near segment ${i}, distance: ${distanceToSegment.toFixed(1)}`);
-                            this.killAndRespawnStar(star);
-                            eaten = true; // Mark as eaten
-                            break; // Exit segment check loop for this star
+                        const currentThreshold = BODY_EAT_DISTANCE_THRESHOLD * (this.starEater.sizeMultiplier || 1.0);
+
+                        if (distanceToSegment < currentThreshold) {
+                            this.killAndRespawnStar(star, this.starEater); // Pass player as eater
+                            eatenByPlayerBody = true;
+                            stopVelocity = false; // Star is being handled
+                            break; // Stop checking segments for this star
                         }
                     }
-                    // If eaten by body, return false to potentially stop iterate processing for this star
-                    if (eaten) return false;
-
-                } else if (star.body) {
-                    // If player is dead or doesn't exist, ensure stars stop moving
-                     if (star.body.velocity.x !== 0 || star.body.velocity.y !== 0) {
-                            star.body.setVelocity(0, 0);
-                     }
                 }
-                // --- End Physics Interactions ---
+                // --- End Player Body Eating ---
 
-                return true; // Continue iteration to the next star
+                // Stop star's velocity if it wasn't vacuumed or eaten by player body
+                if (stopVelocity && (star.body.velocity.x !== 0 || star.body.velocity.y !== 0)) {
+                    star.body.setVelocity(0, 0);
+                }
+
+                // Continue iterating only if star wasn't eaten by player body
+                return !eatenByPlayerBody;
+
             }); // End star iteration
         }
-        // --- End Star Update Loop ---
+        // --- End Star Logic ---
 
 
         // --- Star Spawning ---
+        // Respawn stars if needed to maintain the count
         if (this.stars && this.stars.countActive(true) < MAX_STARS) {
-             this.spawnStar(); // Use the revised spawnStar that checks for overlap
+             this.spawnStar();
         }
     } // End update()
 
     // --- Helper Methods ---
 
+    // drawBoundaryFrame (Keep as is)
     drawBoundaryFrame() {
         if (this.boundaryFrame) this.boundaryFrame.destroy();
         this.boundaryFrame = this.add.graphics();
@@ -186,130 +273,84 @@ export default class GameScene extends Phaser.Scene {
         this.boundaryFrame.strokeRect(offset, offset, this.worldWidth - FRAME_THICKNESS, this.worldHeight - FRAME_THICKNESS);
     }
 
-    // --- makeStarTexture (Solid Core Only) ---
+    // --- makeStarTexture (Keep as is) ---
     makeStarTexture() {
         if (!this.textures.exists('star')) {
             const graphics = this.make.graphics();
             const centerX = STAR_TEXTURE_SIZE / 2;
             const centerY = STAR_TEXTURE_SIZE / 2;
-
-            // Draw the Solid Core ONLY
-            graphics.fillStyle(0xffffff, 1.0); // Solid white
-            graphics.fillCircle(centerX, centerY, STAR_VISUAL_RADIUS); // Core radius
-
-            // Generate Texture
+            graphics.fillStyle(0xffffff, 1.0);
+            graphics.fillCircle(centerX, centerY, STAR_VISUAL_RADIUS);
             graphics.generateTexture('star', STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE);
             graphics.destroy();
             console.log(`Generated SOLID star texture (Radius: ${STAR_VISUAL_RADIUS}).`);
         }
     }
-    // --- END makeStarTexture ---
 
-
-    // --- REVISED: spawnStar (Find Non-Overlapping Position) ---
+    // --- REVISED: spawnStar (Keep non-overlapping logic) ---
     spawnStar() {
-        // Ensure group exists and check limit
-        if (!this.stars || this.stars.countActive(true) >= MAX_STARS) {
-            return;
-        }
-
-        const margin = 50 + FRAME_THICKNESS; // Keep away from frame
+        if (!this.stars || this.stars.countActive(true) >= MAX_STARS) return;
+        const margin = 50 + FRAME_THICKNESS;
         let attempts = 0;
         let validPositionFound = false;
-        let spawnX = 0;
-        let spawnY = 0;
+        let spawnX = 0, spawnY = 0;
 
-        // Try to find a valid position up to MAX_SPAWN_ATTEMPTS times
         while (attempts < MAX_SPAWN_ATTEMPTS && !validPositionFound) {
             attempts++;
-            // Generate a candidate position
             spawnX = Phaser.Math.Between(margin, this.worldWidth - margin);
             spawnY = Phaser.Math.Between(margin, this.worldHeight - margin);
-
-            validPositionFound = true; // Assume position is valid initially
-
-            // Check against all *active* stars
+            validPositionFound = true; // Assume valid initially
             this.stars.children.iterate(existingStar => {
-                // Skip if the existing star is inactive or if we already found an overlap
-                if (!existingStar || !existingStar.active || !validPositionFound) {
-                    return true; // Continue iteration if needed
-                }
-
-                // Calculate distance to the existing active star
-                const distance = Phaser.Math.Distance.Between(
-                    spawnX, spawnY,
-                    existingStar.x, existingStar.y
-                );
-
-                // If too close, mark position as invalid and stop checking for this attempt
+                if (!existingStar || !existingStar.active || !validPositionFound) return true;
+                const distance = Phaser.Math.Distance.Between(spawnX, spawnY, existingStar.x, existingStar.y);
                 if (distance < MIN_STAR_DISTANCE) {
                     validPositionFound = false;
-                    // console.log(`Spawn attempt ${attempts} failed: Too close to existing star at ${existingStar.x.toFixed(0)},${existingStar.y.toFixed(0)} (Dist: ${distance.toFixed(1)})`);
-                    return false; // Stop iterating through existing stars for this attempt
+                    return false; // Stop checking for this attempt
                 }
-                return true; // Continue checking against other existing stars
+                return true;
             });
-        } // End while loop
+        }
 
-        // If a valid position was found (or max attempts reached), spawn the star
         if (validPositionFound) {
-            // console.log(`Spawn attempt ${attempts} succeeded at ${spawnX.toFixed(0)}, ${spawnY.toFixed(0)}`);
             this.spawnStarAt(spawnX, spawnY);
         } else {
-            console.warn(`Could not find a valid non-overlapping position for star after ${MAX_SPAWN_ATTEMPTS} attempts.`);
+            console.warn(`Could not find non-overlapping star position after ${MAX_SPAWN_ATTEMPTS} attempts.`);
             // Optionally spawn anyway: this.spawnStarAt(spawnX, spawnY);
         }
     }
-    // --- END REVISED spawnStar ---
 
-
-    // --- spawnStarAt (Unchanged, places star at given coords) ---
+    // --- spawnStarAt (Keep as is - places star at coords) ---
     spawnStarAt(x, y) {
         if (!this.stars) return null;
-
-        const star = this.stars.get(x, y, 'star'); // Get/reuse sprite using the texture
+        const star = this.stars.get(x, y, 'star');
         if (star) {
-            star.setActive(true);
-            star.setVisible(true);
-            // No alpha setting here (unless flicker is re-added)
-
-            // Apply random tint
-            const randomColor = Phaser.Math.RND.pick(STAR_COLORS);
-            star.setTint(randomColor);
-
-            // Reset physics body state
+            star.setActive(true).setVisible(true);
+            star.setTint(Phaser.Math.RND.pick(STAR_COLORS));
             if (star.body) {
                 star.body.reset(x, y);
                 star.body.enable = true;
                 star.body.setVelocity(0, 0);
                 star.body.setAllowGravity(false);
-                // Set physics body size to match visual core
                 star.body.setCircle(STAR_VISUAL_RADIUS);
-            } else {
-                 console.warn("Star lacks physics body during spawn!");
-            }
+            } else { console.warn("Star lacks physics body during spawn!"); }
         }
         return star;
     }
-    // --- END spawnStarAt ---
 
-    // Callback for head-star physics overlap
-    eatStar(head, star) {
-        // Add checks to prevent processing if player dead or star inactive
+    // --- Player Head vs Star Callback ---
+    handleEatStar(playerHead, star) {
+        // Check added to prevent calls after death begins processing
         if (!star || !star.active || !this.starEater || this.starEater.isDead) {
             return;
         }
-        // console.log("Star eaten by HEAD overlap."); // Can be noisy
-        this.killAndRespawnStar(star); // Consolidate eating logic
+        this.killAndRespawnStar(star, this.starEater); // Pass player instance
     }
 
-    // Helper to handle star removal and respawn trigger
-    killAndRespawnStar(star) {
+
+    // --- MODIFIED: killAndRespawnStar (Accepts eater instance) ---
+    killAndRespawnStar(star, eaterInstance = null) {
         // Prevent double processing
-        if (!star || !star.active) {
-            return;
-        }
-        // No alpha reset needed
+        if (!star || !star.active) return;
 
         // Disable and hide the star
         this.stars.killAndHide(star);
@@ -318,69 +359,157 @@ export default class GameScene extends Phaser.Scene {
             star.body.setVelocity(0, 0);
         }
 
-        // Grow the eater if it's alive
-        if (this.starEater && !this.starEater.isDead) {
-            this.starEater.grow();
+        // Grow the specific eater if it's provided and still alive
+        if (eaterInstance && !eaterInstance.isDead) {
+            eaterInstance.grow(); // Calls grow() on the correct StarEater
+            // Collision group updates are now handled within StarEater.update after adding segment
         }
 
-        // Schedule a new star spawn
+        // Schedule a new star spawn after delay
         this.time.delayedCall(STAR_RESPAWN_TIME, this.spawnStar, [], this);
     }
 
-    // Game Over logic
-    async gameOver(deadStarEater) {
-        if (!deadStarEater || deadStarEater.isDead) {
-            console.log("gameOver called on already dead or invalid eater.");
+
+    // --- NEW: Callback for Player Head hitting Bot Body Segment -> BOT DIES ---
+    handlePlayerHitBotBody(playerHead, botSegment) {
+        // Prevent repeated calls during death sequences or if objects invalid
+        if (this.gameOverActive || !this.starEater || this.starEater.isDead || !this.botController?.getBotInstance() || this.botController.getBotInstance().isDead) {
             return;
         }
-        console.log("GAME OVER - Processing Star Eater Death!");
 
-        // Mark dead, stop physics & camera
-        deadStarEater.isDead = true;
-        if (deadStarEater.head && deadStarEater.head.body) {
-            deadStarEater.head.body.enable = false;
-            deadStarEater.head.body.setVelocity(0, 0);
+        console.log("GameScene: Player head hit Bot Body! Bot dies.");
+        // Kill the BOT, player is the killer
+        this.killStarEater(this.botController.getBotInstance(), this.starEater);
+    }
+
+
+    // --- REVISED: Generic Death Handler (Replaces original gameOver) ---
+    killStarEater(eaterToKill, killer) {
+        // Prevent processing if eater invalid, already dead, or player game over active
+        if (!eaterToKill || eaterToKill.isDead || (eaterToKill === this.starEater && this.gameOverActive)) {
+             console.log(`Kill request ignored for ${eaterToKill?.identifier} (invalid/dead/game over active).`);
+             return;
         }
-        this.cameras.main.stopFollow();
 
-        // Show HTML Popup
-        try {
-            await showPopup("You hit the boundary!", {
+        const killedIdentifier = eaterToKill.identifier;
+        const killerIdentifier = killer ? killer.identifier : 'the boundary';
+        console.log(`--- KILL EVENT: ${killedIdentifier} killed by ${killerIdentifier} ---`);
+
+        // Mark the eater as dead (disables physics, starts fadeout in StarEater.markAsDead)
+        eaterToKill.markAsDead();
+
+        // --- Spawn stars from the dead eater's body (Optional Effect) ---
+        // Keep this if you want the visual explosion of stars
+        const segmentPositions = eaterToKill.bodyParts
+                                      .filter(p => p?.active) // Check if part exists and is active
+                                      .map(segment => ({ x: segment.x, y: segment.y }));
+        console.log(`Spawning ${segmentPositions.length} stars from ${killedIdentifier}'s segments...`);
+        segmentPositions.forEach(pos => {
+            if (typeof pos.x === 'number' && typeof pos.y === 'number') {
+                this.spawnStarAt(pos.x, pos.y);
+            }
+        });
+        // --- End Spawn stars ---
+
+
+        // --- Handle Consequences based on who died ---
+        if (killedIdentifier === 'player') {
+            console.log("Player died - Initiating Game Over sequence.");
+            this.gameOverActive = true; // Set game over flag
+
+            // Stop camera
+            this.cameras.main.stopFollow();
+
+            // Immediately clear player body group to prevent ghost collisions
+            this.playerBodyGroup?.clear(true, true);
+
+            // --- This is your original Game Over Logic ---
+            showPopup("You were eaten or hit the boundary!", {
                 title: 'GAME OVER',
                 buttonText: 'Start Over',
                 onButtonClick: () => {
                     hidePopup();
+                    // Restarting the scene handles cleanup via shutdown()
                     this.scene.restart();
                 }
+            }).catch(error => {
+                 console.error("Failed to show Game Over popup:", error);
+                 // Fallback if popup fails? Maybe just log and wait?
             });
-        } catch (error) {
-            console.error("Failed to show Game Over popup:", error);
+            console.log("Game paused. Waiting for 'Start Over' button click.");
+            // --- End original Game Over Logic ---
+
+        } else if (killedIdentifier === 'bot') {
+            console.log("Bot died - Notifying BotController for cleanup.");
+             // Immediately clear bot body group
+             this.botController?.getBotBodyGroup()?.clear(true, true);
+             // Tell the controller to handle the death (stops timers, cleans up group)
+             // BotController.handleBotDeath NO LONGER handles respawn
+             this.botController?.handleBotDeath(killer);
+             // Bot is now effectively removed from play until scene restart
+
+        } else {
+            console.warn("KillStarEater called with unknown identifier:", killedIdentifier);
         }
 
-        // Explode: Spawn stars from segments
-        console.log("Spawning stars from segments...");
-        if (deadStarEater.bodyParts && this.stars) {
-            const segmentPositions = deadStarEater.bodyParts.map(segment => ({ x: segment.x, y: segment.y }));
-            segmentPositions.forEach((pos) => {
-                if (typeof pos.x === 'number' && typeof pos.y === 'number') {
-                    this.spawnStarAt(pos.x, pos.y);
-                }
-            });
-            console.log("Finished spawning stars.");
+    } // --- End killStarEater ---
+
+
+    // --- NEW: Method to get player body segments group (used by BotController) ---
+    getPlayerBodyGroup() {
+        // Ensure the group is up-to-date before returning it for collision checks
+        // this.updatePlayerBodyGroup(); // This is now called after growth in StarEater
+        return this.playerBodyGroup;
+    }
+
+    // --- NEW: Helper to update the player's body segment group ---
+    // Called initially and after player grows
+    updatePlayerBodyGroup() {
+        if (!this.playerBodyGroup || !this.starEater) {
+             // console.warn("Cannot update player body group - missing group or player.");
+             return; // Exit if group or player doesn't exist
+        }
+        // Clear previous segment references (don't destroy the actual sprites)
+        this.playerBodyGroup.clear();
+
+        // Add currently active segments ONLY if player is ALIVE
+        if (!this.starEater.isDead) {
+             const activeSegments = this.starEater.getBodySegments(); // Gets only active body parts
+             if (activeSegments.length > 0) {
+                 this.playerBodyGroup.addMultiple(activeSegments);
+             }
+        }
+        // If player is dead, the group remains empty.
+    }
+
+    // --- NEW: Cleanup method called by Phaser on scene stop/restart ---
+    shutdown() {
+        console.log("GameScene shutdown: Cleaning up...");
+
+        // Destroy the bot controller (stops its timers, destroys its eater instance and groups)
+        if (this.botController) {
+            this.botController.destroy();
+            this.botController = null;
+            console.log("BotController destroyed.");
         }
 
-        // Destroy old Star Eater parts
-        console.log("Destroying Star Eater segments...");
-        if (deadStarEater.bodyParts) {
-            while (deadStarEater.bodyParts.length > 0) {
-                const segment = deadStarEater.bodyParts.pop();
-                if (segment) segment.destroy();
-            }
-            console.log("Finished destroying segments.");
+        // Destroy player body group explicitly
+        if (this.playerBodyGroup) {
+            this.playerBodyGroup.destroy(true, true); // Destroy group and sprite children within it
+            this.playerBodyGroup = null;
+            console.log("PlayerBodyGroup destroyed.");
         }
-        this.starEater = null; // Clear scene reference
 
-        console.log("Game paused. Waiting for 'Start Over' button click.");
-    } // End gameOver
+        // Optional: Explicitly destroy player if not handled by scene restart fully
+        // if (this.starEater) {
+        //     this.starEater.destroy();
+        //     this.starEater = null;
+        // }
+
+        // Remove any scene-level timers or listeners if needed
+        this.time.removeAllEvents();
+        console.log("GameScene cleanup complete.");
+    }
+    // --- END NEW ---
 
 } // End Scene Class

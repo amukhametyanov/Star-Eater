@@ -18,7 +18,9 @@
 
 /* The content box inside the overlay */
 #game-popup-content {
-    background-color: rgba(40, 40, 60, 0.9); /* Darker, slightly transparent background */
+    /* background-color: rgba(40, 40, 60, 0.9);  */
+    background-image: url("../../assets/universe_bg_tile_compressed.png");
+    background-size: cover;
     padding: 30px 50px;
     border-radius: 12px;
     text-align: center;
