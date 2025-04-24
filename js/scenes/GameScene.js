@@ -2,6 +2,7 @@
 import StarEater from '../gameObjects/StarEater.js';
 import BotController from '../ai/BotController.js'; // ---> IMPORT BOT CONTROLLER
 import { showPopup, hidePopup } from '../endGamePopup/PopupManager.js'; // Ensure path is correct
+import { createScoreDisplay, updateScoreDisplay } from '../ui/ScoreDisplay.js'; // <- Add: Import UI functions
 
 // --- Constants ---
 const MAX_STARS = 600;
@@ -31,6 +32,7 @@ export default class GameScene extends Phaser.Scene {
         this.botController = null;    // Controller for the AI bot
         this.playerBodyGroup = null;  // Physics group for Player's body segments ONLY
         this.stars = null;            // Physics group for stars
+        this.scoreText = null; // <- Add: Property to hold the score text object
         this.worldWidth = 0;
         this.worldHeight = 0;
         this.boundaryFrame = null;
@@ -84,6 +86,9 @@ export default class GameScene extends Phaser.Scene {
 
         // --- Camera Follow Player ---
         this.cameras.main.startFollow(this.starEater.head, true, 0.08, 0.08);
+
+        // --- Create Score Display UI --- // <- Add: This section
+        this.scoreText = createScoreDisplay(this);
 
         // --- Create Stars Group ---
         this.stars = this.physics.add.group({
@@ -364,6 +369,11 @@ export default class GameScene extends Phaser.Scene {
             eaterInstance.grow(); // Calls grow() on the correct StarEater
             // Collision group updates are now handled within StarEater.update after adding segment
         }
+        // --- Update Score Display --- // <- Add: This block
+        if (eaterInstance.identifier === 'player') {
+            updateScoreDisplay(this.scoreText, eaterInstance.totalStarsEaten);
+       }
+       // --- End Score Display Update --- //
 
         // Schedule a new star spawn after delay
         this.time.delayedCall(STAR_RESPAWN_TIME, this.spawnStar, [], this);
@@ -505,6 +515,11 @@ export default class GameScene extends Phaser.Scene {
         //     this.starEater.destroy();
         //     this.starEater = null;
         // }
+
+        if (this.scoreText) { // <- Add
+            this.scoreText.destroy(); // <- Add
+            this.scoreText = null; // <- Add
+        }
 
         // Remove any scene-level timers or listeners if needed
         this.time.removeAllEvents();
