@@ -379,7 +379,7 @@ export default class GameScene extends Phaser.Scene {
 
         console.log("GameScene: Player head hit Bot Body! Bot dies.");
         // Kill the BOT, player is the killer
-        this.killStarEater(this.botController.getBotInstance(), this.starEater);
+        this.killStarEater(this.starEater, this.botController.getBotInstance());
     }
 
 

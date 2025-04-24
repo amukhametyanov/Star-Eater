@@ -16,7 +16,7 @@ const SIZE_ANIMATION_EASE = 'Power2';
 // Head evolution constants
 const STARS_FOR_MIDDLE_HEAD = 50;
 const STARS_FOR_MAX_HEAD = 100;
-const HEAD_CHANGE_ANIMATION_DURATION = 500;
+const HEAD_CHANGE_ANIMATION_DURATION = 800;
 
 export default class StarEater {
     // Added 'identifier' and optional 'config' for bots

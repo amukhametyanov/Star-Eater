@@ -25,7 +25,7 @@ const config = {
             },
             // debug: true // Useful for seeing physics bodies and world bounds
             // --- >>> ADD PHYSICS DEBUG SETTINGS HERE <<< ---
-            debug: true,            // Master switch to enable debug rendering
+            debug: false,            // Master switch to enable debug rendering
             debugShowBody: true,    // Show physics bodies outlines
             debugShowVelocity: true, // Show velocity vectors
             debugBodyColor: 0xff00ff,     // Pink for bodies (easier to see than default)
