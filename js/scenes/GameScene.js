@@ -149,6 +149,8 @@ export default class GameScene extends Phaser.Scene {
 
         // --- End Physics Collisions ---
 
+        this.setupInputHandling(); // <- Add: Call the input setup method here
+
         console.log("GameScene create complete.");
     } // End create()
 
@@ -268,6 +270,50 @@ export default class GameScene extends Phaser.Scene {
     } // End update()
 
     // --- Helper Methods ---
+
+          
+    // --- Add: Input Handling Setup --- // <- Add: This whole method
+    setupInputHandling() {
+        // Check if input system exists before adding listeners
+        if (!this.input) {
+            console.error("Input system not available in setupInputHandling.");
+            return;
+        }
+
+        // Listen for Pointer Down (specifically left button)
+        this.input.on(Phaser.Input.Events.POINTER_DOWN, (pointer) => {
+            // Ensure the primary button (usually left) is pressed
+            if (pointer.leftButtonDown()) {
+                // Check if the player exists, is alive, and has the boost method before calling
+                if (this.starEater && !this.starEater.isDead && typeof this.starEater.startBoost === 'function') {
+                    this.starEater.startBoost();
+                }
+            }
+        });
+
+        // Listen for Pointer Up (specifically left button)
+        this.input.on(Phaser.Input.Events.POINTER_UP, (pointer) => {
+            // Check if the primary button (usually left) was the one released
+            if (pointer.leftButtonReleased()) {
+                // Check if the player exists and has the method before calling
+                // No need to check isDead here, stopping boost is safe even if player just died
+                if (this.starEater && typeof this.starEater.stopBoost === 'function') {
+                    this.starEater.stopBoost();
+                }
+            }
+        });
+
+        // Also stop boost if pointer moves off the game canvas while down
+        this.input.on(Phaser.Input.Events.GAME_OUT, () => {
+            if (this.starEater && typeof this.starEater.stopBoost === 'function') {
+                this.starEater.stopBoost();
+            }
+        });
+        console.log("Input handling for boost setup."); // Optional log
+    }
+    // --- End Add --- //
+
+
 
     // drawBoundaryFrame (Keep as is)
     drawBoundaryFrame() {
@@ -495,6 +541,17 @@ export default class GameScene extends Phaser.Scene {
     // --- NEW: Cleanup method called by Phaser on scene stop/restart ---
     shutdown() {
         console.log("GameScene shutdown: Cleaning up...");
+
+        this.isInitialized = false; // Reset flag if you added one
+
+        // --- Stop Input Listeners --- // <- Add: This block
+        // Check if input manager exists before trying to remove listeners
+        if (this.input) {
+             this.input.off(Phaser.Input.Events.POINTER_DOWN);
+             this.input.off(Phaser.Input.Events.POINTER_UP);
+             this.input.off(Phaser.Input.Events.GAME_OUT);
+        }
+        // --- End Add --- //
 
         // Destroy the bot controller (stops its timers, destroys its eater instance and groups)
         if (this.botController) {
