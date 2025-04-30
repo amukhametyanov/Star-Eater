@@ -44,7 +44,7 @@ export function createScoreDisplay(scene) { // <- Add: Export this function
  */
 export function updateScoreDisplay(scoreTextObject, newScore) { // <- Add: Export this function
     if (scoreTextObject && typeof scoreTextObject.setText === 'function') { // Check if it's a valid text object
-        scoreTextObject.setText('Score: ' + newScore);
+        scoreTextObject.setText('Stars: ' + newScore);
     } else {
         // console.warn("Attempted to update invalid score text object.");
     }
