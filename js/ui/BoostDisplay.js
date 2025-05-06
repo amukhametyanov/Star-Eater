@@ -8,9 +8,13 @@ const ICON_SIZE = 24;
 
 // Colors (feel free to change)
 const COLOR_TRACK = 0x555555; // Background circle
-const COLOR_READY = 0x00ffff; // Cyan
-const COLOR_BOOSTING = 0xffff00; // Yellow
-const COLOR_COOLDOWN = 0xff8800; // Orange
+const COLOR_READY = 0x00ffff; // Cyan (boost ready)
+const COLOR_BOOSTING = 0xffff00; // Yellow (boost active)
+const COLOR_COOLDOWN = 0xff8800; // Orange (cooldown)
+// Ghost ability colors
+const COLOR_GHOST_READY = 0x9b59ff; // Purple (ghost ready)
+const COLOR_GHOST_ACTIVE = 0xccccff; // Light purple (ghost active)
+const COLOR_GHOST_COOLDOWN = 0x8888ff; // Blue (ghost cooldown)
 
 // Text Style for Cooldown Number
 const COOLDOWN_TEXT_STYLE = {
@@ -30,7 +34,7 @@ const COOLDOWN_TEXT_STYLE = {
  * @param {string} iconKey - The key for the preloaded boost icon texture.
  * @returns {object|null} An object containing references { icon, meterGraphics, cooldownText } or null if scene invalid.
  */
-export function createBoostDisplay(scene, x, y, iconKey = 'boost-icon') { // <- Add: Export create function
+export function createBoostDisplay(scene, x, y, iconKey = 'boost-icon') { // Export create function
     if (!scene || !scene.add) {
         console.error("BoostDisplay: Invalid scene object provided.");
         return null;
@@ -81,8 +85,9 @@ export function createBoostDisplay(scene, x, y, iconKey = 'boost-icon') { // <- 
  * @param {number} boostState.cooldownRemaining - Cooldown remaining (seconds).
  * @param {boolean} boostState.boostingActive - Is the boost currently active?
  * @param {boolean} boostState.canUseAbility - Is the ability available for the current stage?
+ * @param {string} [boostState.abilityType='boost'] - Type of ability ('boost' or 'ghost').
  */
-export function updateBoostDisplay(uiElements, boostState) { // <- Add: Export update function
+export function updateBoostDisplay(uiElements, boostState) { // Export update function
     // Safety check
     if (!uiElements || !uiElements.icon || !uiElements.meterGraphics || !uiElements.cooldownText) {
         // console.warn("updateBoostDisplay: Invalid UI elements provided.");
@@ -114,30 +119,38 @@ export function updateBoostDisplay(uiElements, boostState) { // <- Add: Export u
     let iconAlpha = 0.7; // Default dim state
     let showCooldownNum = false;
 
+    // Ability type: 'boost' (default) or 'ghost'
+    const abilityType = boostState.abilityType || 'boost';
+
+    // Choose colors based on ability type
+    let colorReady = COLOR_READY;
+    let colorActive = COLOR_BOOSTING;
+    let colorCooldown = COLOR_COOLDOWN;
+    if (abilityType === 'ghost') {
+        colorReady = COLOR_GHOST_READY;
+        colorActive = COLOR_GHOST_ACTIVE;
+        colorCooldown = COLOR_GHOST_COOLDOWN;
+    }
+
     if (boostState.cooldownActive) {
-        progressColor = COLOR_COOLDOWN;
-        // Cooldown fills up: angle goes from startAngle to full circle
+        progressColor = colorCooldown;
         endAngle = startAngle + (boostState.cooldownProgress * Math.PI * 2);
-        iconAlpha = 0.5; // Dimmer during cooldown
+        iconAlpha = 0.5;
         showCooldownNum = true;
-
     } else if (boostState.boostingActive) {
-        progressColor = COLOR_BOOSTING;
-        // Charge depletes: angle goes from full circle down to startAngle
+        progressColor = colorActive;
         const chargePercent = Math.max(0, boostState.charge / boostState.maxCharge);
         endAngle = startAngle + (chargePercent * Math.PI * 2);
-        iconAlpha = 1.0; // Bright while boosting
-
-    } else if (boostState.charge >= boostState.maxCharge) { // Ready
-        progressColor = COLOR_READY;
-        endAngle = startAngle + (Math.PI * 2); // Full circle
-        iconAlpha = 1.0; // Bright when ready
-
-    } else { // Partially charged, not boosting or cooling down
-        progressColor = COLOR_READY; // Show ready color but partial amount
+        iconAlpha = 1.0;
+    } else if (boostState.charge >= boostState.maxCharge) {
+        progressColor = colorReady;
+        endAngle = startAngle + (Math.PI * 2);
+        iconAlpha = 1.0;
+    } else {
+        progressColor = colorReady;
         const chargePercent = Math.max(0, boostState.charge / boostState.maxCharge);
         endAngle = startAngle + (chargePercent * Math.PI * 2);
-        iconAlpha = 0.7; // Dim if partially charged but not ready/boosting
+        iconAlpha = 0.7;
     }
 
     // --- Draw the Progress Arc ---

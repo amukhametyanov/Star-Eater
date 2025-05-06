@@ -2,7 +2,7 @@
 import StarEater from '../gameObjects/StarEater.js';
 import BotController from '../ai/BotController.js'; // ---> IMPORT BOT CONTROLLER
 import { showPopup, hidePopup } from '../endGamePopup/PopupManager.js'; // Ensure path is correct
-import { createScoreDisplay, updateScoreDisplay } from '../ui/ScoreDisplay.js'; // <- Add: Import UI functions
+import { createScoreDisplay, updateScoreDisplay } from '../ui/ScoreDisplay.js'; // Import UI functions
 import { createBoostDisplay, updateBoostDisplay } from '../ui/BoostDisplay.js';
 
 // --- Constants ---
@@ -37,13 +37,15 @@ export default class GameScene extends Phaser.Scene {
         this.botController = null;    // Controller for the AI bot
         this.playerBodyGroup = null;  // Physics group for Player's body segments ONLY
         this.stars = null;            // Physics group for stars
-        this.scoreText = null; // <- Add: Property to hold the score text object
+        this.scoreText = null; // Property to hold the score text object
         this.boostUI = null; 
         this.isInitialized = false; // Keep scene init flag
         this.worldWidth = 0;
         this.worldHeight = 0;
         this.boundaryFrame = null;
         this.gameOverActive = false; // Flag to prevent duplicate game over triggers
+        this.playerHeadStarOverlap = null; // Track player-vs-star overlap
+        this.playerHeadBotBodyOverlap = null; // Track player-vs-bot overlap
     }
 
     init(data) {
@@ -96,14 +98,14 @@ export default class GameScene extends Phaser.Scene {
         // --- Camera Follow Player ---
         this.cameras.main.startFollow(this.starEater.head, true, 0.08, 0.08);
 
-        // --- Create Score Display UI (Phaser Text) --- // <- Update: Keep Phaser score
+        // --- Create Score Display UI (Phaser Text) --- // Keep Phaser score
         this.scoreText = createScoreDisplay(this);
         if (this.scoreText) {
             updateScoreDisplay(this.scoreText, 0); // Set initial score
         } else { console.warn("Failed to create Phaser score text."); }
         // --- End Score Display --- //
 
-        // --- Create Boost Display UI (Phaser Objects) --- // <- Add: This section
+        // --- Create Boost Display UI (Phaser Objects) --- // This section
         // Position it relative to the score text (adjust offsets as needed)
         if (this.scoreText) { // Position based on score text if it exists
             const scoreBounds = this.scoreText.getBounds();
@@ -144,8 +146,8 @@ export default class GameScene extends Phaser.Scene {
         // --- Setup Physics Collisions ---
         console.log("Setting up physics overlaps...");
 
-        // 1. Player Head vs Stars
-        this.physics.add.overlap(
+        // Track overlap objects for toggling
+        this.playerHeadStarOverlap = this.physics.add.overlap(
             this.starEater.head,
             this.stars,
             this.handleEatStar, // Use scene's handler
@@ -153,10 +155,9 @@ export default class GameScene extends Phaser.Scene {
             this // Context
         );
 
-        // 2. Player Head vs Bot Body Segments -> BOT DIES
         const botBodyGroup = this.botController?.getBotBodyGroup(); // Safely get bot group
         if (this.starEater?.head && botBodyGroup) {
-            this.physics.add.overlap(
+            this.playerHeadBotBodyOverlap = this.physics.add.overlap(
                 this.starEater.head,
                 botBodyGroup,
                 this.handlePlayerHitBotBody, // Callback defined below
@@ -178,7 +179,7 @@ export default class GameScene extends Phaser.Scene {
 
         // --- End Physics Collisions ---
 
-        this.setupInputHandling(); // <- Add: Call the input setup method here
+        this.setupInputHandling(); // Call the input setup method here
 
         this.isInitialized = true;
 
@@ -197,6 +198,17 @@ export default class GameScene extends Phaser.Scene {
         if (this.botController) {
             this.botController.update(time, delta);
              // Bot body group updates are handled after growth in StarEater.update
+        }
+
+        // --- Ghost collision logic ---
+        if (this.starEater && this.starEater.currentHeadLevel === 'middle') {
+            const ghosting = this.starEater.isGhosting;
+            if (this.playerHeadStarOverlap) this.playerHeadStarOverlap.active = !ghosting;
+            if (this.playerHeadBotBodyOverlap) this.playerHeadBotBodyOverlap.active = !ghosting;
+        } else {
+            // Always enable overlaps in other forms
+            if (this.playerHeadStarOverlap) this.playerHeadStarOverlap.active = true;
+            if (this.playerHeadBotBodyOverlap) this.playerHeadBotBodyOverlap.active = true;
         }
 
         // --- Star Logic (Vacuum + Player Body Eating) ---
@@ -299,22 +311,40 @@ export default class GameScene extends Phaser.Scene {
              this.spawnStar();
         }
 
-        // --- Update UI --- // <- Update: Call Phaser Boost UI update
-        if (this.starEater && this.boostUI && !this.starEater.isDead) { // <- Update: Check boostUI exists and player not dead
-            // Gather required state from the player's StarEater
+        // --- Update UI --- // Call Phaser Boost UI update
+        if (this.starEater && this.boostUI && !this.starEater.isDead) {
+            let abilityType = 'boost';
+            let charge = this.starEater.boostCharge;
+            let maxCharge = BOOST_DURATION;
+            let cooldownActive = this.starEater.isBoostOnCooldown;
+            let cooldownProgress = this.starEater.boostCooldownTimer ? (this.starEater.boostCooldownTimer.getProgress()) : 0;
+            let cooldownRemaining = this.starEater.boostCooldownTimer ? Math.max(0, BOOST_COOLDOWN - this.starEater.boostCooldownTimer.getElapsedSeconds()) : BOOST_COOLDOWN;
+            let boostingActive = this.starEater.isBoosting;
+            let canUseAbility = this.starEater.canUseAbility;
+            // If in medium form, show ghost state instead
+            if (this.starEater.currentHeadLevel === 'middle') {
+                abilityType = 'ghost';
+                charge = this.starEater.ghostCharge;
+                maxCharge = 2.0;
+                cooldownActive = this.starEater.isGhostOnCooldown;
+                cooldownProgress = this.starEater.ghostCooldownTimer ? (this.starEater.ghostCooldownTimer.getProgress()) : 0;
+                cooldownRemaining = this.starEater.ghostCooldownTimer ? Math.max(0, 5.0 - this.starEater.ghostCooldownTimer.getElapsedSeconds()) : 5.0;
+                boostingActive = this.starEater.isGhosting;
+                canUseAbility = this.starEater.canUseAbility;
+                console.log("Boost UI: Ghosting active, showing ghost state.");
+            }
             const boostState = {
-                charge: this.starEater.boostCharge,
-                maxCharge: BOOST_DURATION, // Use constant defined in GameScene
-                cooldownActive: this.starEater.isBoostOnCooldown,
-                // Calculate cooldown progress (0=start, 1=end) for the UI function
-                cooldownProgress: this.starEater.boostCooldownTimer ? (this.starEater.boostCooldownTimer.getProgress()) : 0, // <- Update: Calculate progress
-                cooldownRemaining: this.starEater.boostCooldownTimer ? Math.max(0, BOOST_COOLDOWN - this.starEater.boostCooldownTimer.getElapsedSeconds()) : BOOST_COOLDOWN, // <- Update: Calculate remaining secs
-                boostingActive: this.starEater.isBoosting,
-                canUseAbility: this.starEater.canUseAbility
+                charge,
+                maxCharge,
+                cooldownActive,
+                cooldownProgress,
+                cooldownRemaining,
+                boostingActive,
+                canUseAbility,
+                abilityType
             };
-            updateBoostDisplay(this.boostUI, boostState); // <- Update: Call Phaser UI update function
+            updateBoostDisplay(this.boostUI, boostState);
         } else if (this.boostUI && this.starEater?.isDead && this.boostUI.icon.visible) {
-            // <- Add: Explicitly hide UI if player died this frame and it was visible
             this.boostUI.icon.setVisible(false);
             this.boostUI.meterGraphics.setVisible(false);
             this.boostUI.cooldownText.setVisible(false);
@@ -326,7 +356,7 @@ export default class GameScene extends Phaser.Scene {
     // --- Helper Methods ---
 
           
-    // --- Add: Input Handling Setup --- // <- Add: This whole method
+    // --- Add: Input Handling Setup --- // This whole method
     setupInputHandling() {
         // Check if input system exists before adding listeners
         if (!this.input) {
@@ -339,8 +369,12 @@ export default class GameScene extends Phaser.Scene {
             // Ensure the primary button (usually left) is pressed
             if (pointer.leftButtonDown()) {
                 // Check if the player exists, is alive, and has the boost method before calling
-                if (this.starEater && !this.starEater.isDead && typeof this.starEater.startBoost === 'function') {
-                    this.starEater.startBoost();
+                if (this.starEater && !this.starEater.isDead) {
+                    if (this.starEater.currentHeadLevel === 'middle' && typeof this.starEater.startGhost === 'function') {
+                        this.starEater.startGhost();
+                    } else if (typeof this.starEater.startBoost === 'function') {
+                        this.starEater.startBoost();
+                    }
                 }
             }
         });
@@ -351,19 +385,27 @@ export default class GameScene extends Phaser.Scene {
             if (pointer.leftButtonReleased()) {
                 // Check if the player exists and has the method before calling
                 // No need to check isDead here, stopping boost is safe even if player just died
-                if (this.starEater && typeof this.starEater.stopBoost === 'function') {
-                    this.starEater.stopBoost();
+                if (this.starEater) {
+                    if (this.starEater.currentHeadLevel === 'middle' && typeof this.starEater.stopGhost === 'function') {
+                        this.starEater.stopGhost();
+                    } else if (typeof this.starEater.stopBoost === 'function') {
+                        this.starEater.stopBoost();
+                    }
                 }
             }
         });
 
         // Also stop boost if pointer moves off the game canvas while down
         this.input.on(Phaser.Input.Events.GAME_OUT, () => {
-            if (this.starEater && typeof this.starEater.stopBoost === 'function') {
-                this.starEater.stopBoost();
+            if (this.starEater) {
+                if (this.starEater.currentHeadLevel === 'middle' && typeof this.starEater.stopGhost === 'function') {
+                    this.starEater.stopGhost();
+                } else if (typeof this.starEater.stopBoost === 'function') {
+                    this.starEater.stopBoost();
+                }
             }
         });
-        console.log("Input handling for boost setup."); // Optional log
+        console.log("Input handling for boost/ghost setup.");
     }
     // --- End Add --- //
 
@@ -469,7 +511,7 @@ export default class GameScene extends Phaser.Scene {
             eaterInstance.grow(); // Calls grow() on the correct StarEater
             // Collision group updates are now handled within StarEater.update after adding segment
         }
-        // --- Update Score Display --- // <- Add: This block
+        // --- Update Score Display --- // This block
         if (eaterInstance.identifier === 'player') {
             updateScoreDisplay(this.scoreText, eaterInstance.totalStarsEaten);
        }
@@ -598,7 +640,7 @@ export default class GameScene extends Phaser.Scene {
 
         this.isInitialized = false; // Reset flag if you added one
 
-        // --- Stop Input Listeners --- // <- Add: This block
+        // --- Stop Input Listeners --- // This block
         // Check if input manager exists before trying to remove listeners
         if (this.input) {
              this.input.off(Phaser.Input.Events.POINTER_DOWN);
@@ -627,15 +669,15 @@ export default class GameScene extends Phaser.Scene {
         //     this.starEater = null;
         // }
 
-        // --- Destroy UI Elements --- // <- Update: Destroy Phaser Boost UI objects
+        // --- Destroy UI Elements --- // Destroy Phaser Boost UI objects
         if (this.scoreText) {
             this.scoreText.destroy(); this.scoreText = null;
         }
-        if (this.boostUI) { // <- Add: Check boostUI exists
+        if (this.boostUI) { // Check boostUI exists
             if(this.boostUI.icon) this.boostUI.icon.destroy(); // <- Add
             if(this.boostUI.meterGraphics) this.boostUI.meterGraphics.destroy(); // <- Add
             if(this.boostUI.cooldownText) this.boostUI.cooldownText.destroy(); // <- Add
-            this.boostUI = null; // <- Add: Nullify reference
+            this.boostUI = null; // Nullify reference
         }
         // removeBoostUI(); // Remove call to HTML UI remover
         // --- End Update --- //

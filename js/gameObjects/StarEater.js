@@ -18,10 +18,15 @@ const STARS_FOR_MIDDLE_HEAD = 50;
 const STARS_FOR_MAX_HEAD = 100;
 const HEAD_CHANGE_ANIMATION_DURATION = 800;
 
-// --- Add: Stage 1 Boost Constants --- // <- Add: This section
+// --- Add: Stage 1 Boost Constants ---
 const BOOST_SPEED_MULTIPLIER = 1.8; // Speed increase factor
 const BOOST_DURATION = 2.0;       // Total seconds of boost charge
 const BOOST_COOLDOWN = 5.0;         // Cooldown in seconds after depletion
+// --- End Add ---
+
+// --- Add: Ghost Ability Constants ---
+const GHOST_DURATION = 2.0; // seconds
+const GHOST_COOLDOWN = 5.0; // seconds
 // --- End Add ---
 
 export default class StarEater {
@@ -31,8 +36,8 @@ export default class StarEater {
         this.identifier = identifier; // 'player' or 'bot'
 
         // Use config for bots, defaults from constants for player
-        this.baseHeadSpeed = config.headSpeed || HEAD_SPEED; // <- Update: Store base speed separately
-        this.headSpeed = this.baseHeadSpeed;                 // <- Update: Current speed starts at base
+        this.baseHeadSpeed = config.headSpeed || HEAD_SPEED; // Store base speed separately
+        this.headSpeed = this.baseHeadSpeed;                 // Current speed starts at base
         this.turnRate = config.turnRate || TURN_RATE;
         // Use STARTING_SIZE constant unless overridden by config (primarily for bot)
         this.startingSize = config.startingSize || STARTING_SIZE;
@@ -55,13 +60,20 @@ export default class StarEater {
         this.targetAngle = null; // Used by BotController
         // --- End AI Control ---
 
-         // --- Add: Boost State Variables --- // <- Add: This section
+         // --- Add: Boost State Variables ---
         // Initialize based on starting state (Stage 1)
         this.canUseAbility = (this.currentHeadLevel === 'low'); // Only usable in stage 1
         this.isBoosting = false;         // Is boost currently active?
         this.boostCharge = BOOST_DURATION; // Remaining boost time available
         this.isBoostOnCooldown = false;  // Is the ability recharging?
         this.boostCooldownTimer = null;  // Phaser TimerEvent for cooldown management
+        // --- End Add ---
+
+        // --- Ghost Ability State ---
+        this.isGhosting = false;
+        this.ghostCharge = GHOST_DURATION;
+        this.isGhostOnCooldown = false;
+        this.ghostCooldownTimer = null;
         // --- End Add ---
 
         // --- Head Creation ---
@@ -208,23 +220,23 @@ export default class StarEater {
     updateHeadTexture() {
         if (this.isDead || !this.scene) return;
 
-        let originalLevel = this.currentHeadLevel; // <- Add: Remember original level
+        let originalLevel = this.currentHeadLevel; // Remember original level
         let newHeadLevel = this.currentHeadLevel;
         let newTexture = '';
-        let abilityShouldBeActive = true; // <- Add: Assume active by default for 'low'
+        let abilityShouldBeActive = true; // Assume active by default for 'low'
 
         // Determine new texture based on total stars eaten
         if (this.totalStarsEaten >= STARS_FOR_MAX_HEAD && this.currentHeadLevel !== 'max') {
             newHeadLevel = 'max';
             newTexture = 'max-level-head';
-            abilityShouldBeActive = false; // <- Update: Stage 3 has no boost
+            abilityShouldBeActive = false; // Stage 3 has no ability
         } else if (this.totalStarsEaten >= STARS_FOR_MIDDLE_HEAD && this.currentHeadLevel === 'low') {
             newHeadLevel = 'middle';
             newTexture = 'middle-level-head';
-            abilityShouldBeActive = false; // <- Update: Stage 2 has no boost
+            abilityShouldBeActive = true; // Stage 2: ghost ability
         } else {
-            // Ensure if somehow not 'low', 'middle', or 'max', default based on level
-             abilityShouldBeActive = (newHeadLevel === 'low'); // <- Update: Only active if explicitly 'low'
+            // Fix: ability should be active for low or middle
+            abilityShouldBeActive = (newHeadLevel === 'low' || newHeadLevel === 'middle');
         }
 
         // If level changed, apply texture with animation
@@ -255,13 +267,13 @@ export default class StarEater {
         }
 
         // Update ability usability AFTER potentially changing level
-        if (this.canUseAbility !== abilityShouldBeActive) { // <- Add: This block
+        if (this.canUseAbility !== abilityShouldBeActive) {
             this.canUseAbility = abilityShouldBeActive;
-            console.log(`${this.identifier} boost ability availability set to: ${this.canUseAbility}`);
-            // If ability got disabled while boosting, stop it
-            if (!this.canUseAbility && this.isBoosting) {
-                this.stopBoost();
-                console.log(`${this.identifier} boost stopped due to stage change.`);
+            console.log(`${this.identifier} ability availability set to: ${this.canUseAbility}`);
+            // If ability got disabled while boosting/ghosting, stop it
+            if (!this.canUseAbility) {
+                if (this.isBoosting) this.stopBoost();
+                if (this.isGhosting) this.stopGhost();
             }
         }
     }
@@ -301,7 +313,7 @@ export default class StarEater {
     }
     // --- END ADD ---
 
-     // --- Add: Boost Ability Methods --- // <- Add: This section
+     // --- Add: Boost Ability Methods ---
      startBoost() {
         // Conditions: Player only, correct stage, alive, not already boosting, not on cooldown, has charge
         if (this.identifier !== 'player' || !this.canUseAbility || this.isDead || this.isBoosting || this.isBoostOnCooldown || this.boostCharge <= 0) {
@@ -353,8 +365,45 @@ export default class StarEater {
               [], this // args, scope
          );
     }
-    // --- End Add Boost Methods --- //
+    // --- End Add Boost Methods ---
 
+    // --- Ghost Ability Methods ---
+    startGhost() {
+        // Only allow in medium form, not dead, not already ghosting, not on cooldown, has charge
+        if (this.identifier !== 'player' || this.currentHeadLevel !== 'middle' || this.isDead || this.isGhosting || this.isGhostOnCooldown || this.ghostCharge <= 0) {
+            return;
+        }
+        this.isGhosting = true;
+        // Disable collisions with bot and stars (handled externally)
+    }
+
+    stopGhost() {
+        if (this.isGhosting) {
+            this.isGhosting = false;
+            // Re-enable collisions (handled externally)
+            if (this.ghostCharge <= 0 && !this.isGhostOnCooldown) {
+                this._startGhostCooldown();
+            }
+        }
+    }
+
+    _startGhostCooldown() {
+        if (!this.scene || this.isGhostOnCooldown) return;
+        this.isGhostOnCooldown = true;
+        this.ghostCharge = 0;
+        if (this.ghostCooldownTimer) this.ghostCooldownTimer.remove();
+        this.ghostCooldownTimer = this.scene.time.delayedCall(
+            GHOST_COOLDOWN * 1000,
+            () => {
+                if (!this.scene || this.isDead || this.isDestroyed) return;
+                this.isGhostOnCooldown = false;
+                this.ghostCharge = GHOST_DURATION;
+                this.ghostCooldownTimer = null;
+            },
+            [], this
+        );
+    }
+    // --- End Ghost Ability Methods ---
 
     update(time, delta) {
         if (this.isDead || !this.scene) { // Check if dead or scene gone
@@ -460,7 +509,7 @@ export default class StarEater {
         }
         // --- End Body Segment Following ---
 
-        // --- Add: Boost Depletion Logic --- // <- Add: This section
+        // --- Add: Boost Depletion Logic ---
         if (this.isBoosting) { // Only deplete if currently boosting
             this.boostCharge -= deltaSec; // Deplete charge based on frame time
             // console.log(`Boost Charge: ${this.boostCharge.toFixed(2)}`); // Debug log (can be noisy)
@@ -470,8 +519,17 @@ export default class StarEater {
                 this.stopBoost(); // Stop the effect (will trigger cooldown)
             }
         }
-        // --- End Add --- //
+        // --- End Add ---
 
+        // --- Ghost Depletion Logic ---
+        if (this.isGhosting) {
+            this.ghostCharge -= deltaSec;
+            if (this.ghostCharge <= 0) {
+                this.ghostCharge = 0;
+                this.stopGhost();
+            }
+        }
+        // --- End Add ---
 
         // --- World Bounds Collision Check (KEEP DETECTION, CHANGE CONSEQUENCE) ---
         // Check if the body *could* collide (onWorldBounds=true) and then if it *is* blocked
@@ -498,7 +556,7 @@ export default class StarEater {
         this.isDead = true;
         console.log(`StarEater (${this.identifier}) marked as dead.`);
 
-        // --- Add: Stop boost and clear cooldown timer --- // <- Add: This block
+        // --- Add: Stop boost and clear cooldown timer ---
         if (this.isBoosting) {
             this.stopBoost(); // Stop active boost effect cleanly
        }
@@ -508,8 +566,17 @@ export default class StarEater {
        }
        this.isBoostOnCooldown = false; // Ensure cooldown state is cleared
        this.boostCharge = BOOST_DURATION; // Optional: Reset charge on death? Resetting is simple.
-       this.headSpeed = this.baseHeadSpeed; // <- Add: Ensure speed is reset to base on death
+       this.headSpeed = this.baseHeadSpeed; // Ensure speed is reset to base on death
        // --- End Add ---
+
+        // Stop ghost and clear cooldown timer
+        if (this.isGhosting) this.stopGhost();
+        if (this.ghostCooldownTimer) {
+            this.ghostCooldownTimer.remove();
+            this.ghostCooldownTimer = null;
+        }
+        this.isGhostOnCooldown = false;
+        this.ghostCharge = GHOST_DURATION;
 
         // Stop movement and disable physics interaction for the head
         if (this.head?.body) { // Optional chaining for safety
@@ -565,7 +632,7 @@ export default class StarEater {
         this.isDead = false;
         this.targetAngle = null; // Reset AI target angle
         this.movementAngle = Math.random() * Math.PI * 2; // Assign random new direction
-        this.headSpeed = this.baseHeadSpeed; // <- Update: Reset speed to base
+        this.headSpeed = this.baseHeadSpeed; // Reset speed to base
 
         // --- OPTIONAL: Reset Stats ---
         // Uncomment below if you want eaters to reset size/length on respawn
@@ -585,7 +652,7 @@ export default class StarEater {
         // }
         // --- End Optional Reset Stats ---
 
-        // --- Add: Reset boost state on respawn --- // <- Add: This section
+        // --- Add: Reset boost state on respawn ---
         this.isBoosting = false;
         this.boostCharge = BOOST_DURATION;
         this.isBoostOnCooldown = false;
@@ -595,8 +662,17 @@ export default class StarEater {
         }
         // Set ability availability based on current stage (important if stats aren't reset)
         this.canUseAbility = (this.currentHeadLevel === 'low');
-        console.log(`${this.identifier} respawned. Boost available: ${this.canUseAbility}`); // <- Add: Log state
+        console.log(`${this.identifier} respawned. Boost available: ${this.canUseAbility}`); // Log state
         // --- End Add ---
+
+        // Reset ghost state on respawn
+        this.isGhosting = false;
+        this.ghostCharge = GHOST_DURATION;
+        this.isGhostOnCooldown = false;
+        if (this.ghostCooldownTimer) {
+            this.ghostCooldownTimer.remove();
+            this.ghostCooldownTimer = null;
+        }
 
         // Reposition Head and re-enable physics/visuals
         if (this.head) {
@@ -639,12 +715,18 @@ export default class StarEater {
         console.log(`Destroying StarEater (${this.identifier})...`);
         this.isDead = true; // Ensure marked as dead
 
-        // --- Add: Clear cooldown timer --- // <- Add: This block
+        // --- Add: Clear cooldown timer ---
         if (this.boostCooldownTimer) {
             this.boostCooldownTimer.remove();
             this.boostCooldownTimer = null;
        }
-       // --- End Add --- //
+       // --- End Add ---
+
+        // Clear ghost cooldown timer
+        if (this.ghostCooldownTimer) {
+            this.ghostCooldownTimer.remove();
+            this.ghostCooldownTimer = null;
+        }
 
         // Stop any running tweens targeting this instance or its parts
         if (this.scene) {
