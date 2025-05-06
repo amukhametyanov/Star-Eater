@@ -374,12 +374,15 @@ export default class StarEater {
             return;
         }
         this.isGhosting = true;
-        // Disable collisions with bot and stars (handled externally)
+        // Make all segments ghostly
+        this.setGhostAlpha(0.4);
     }
 
     stopGhost() {
         if (this.isGhosting) {
             this.isGhosting = false;
+            // Restore normal alpha
+            this.setGhostAlpha(1.0);
             // Re-enable collisions (handled externally)
             if (this.ghostCharge <= 0 && !this.isGhostOnCooldown) {
                 this._startGhostCooldown();
@@ -402,6 +405,11 @@ export default class StarEater {
             },
             [], this
         );
+    }
+
+    setGhostAlpha(alpha) {
+        if (this.head) this.head.setAlpha(alpha);
+        this.getBodySegments().forEach(seg => seg.setAlpha(alpha));
     }
     // --- End Ghost Ability Methods ---
 

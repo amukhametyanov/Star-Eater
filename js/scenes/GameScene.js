@@ -245,7 +245,11 @@ export default class GameScene extends Phaser.Scene {
 
                 // Calculate distance to player if alive
                 if (playerHead) {
-                    distSqPlayer = Phaser.Math.Distance.Squared(starX, starY, playerHead.x, playerHead.y);
+                    // Disable vacuum if player is ghosting
+                    const playerIsGhosting = this.starEater && this.starEater.currentHeadLevel === 'middle' && this.starEater.isGhosting;
+                    if (!playerIsGhosting) {
+                        distSqPlayer = Phaser.Math.Distance.Squared(starX, starY, playerHead.x, playerHead.y);
+                    }
                 }
                 // Calculate distance to bot if alive
                 if (botHead) {                       // <- Update (Check if bot is valid)
@@ -274,7 +278,8 @@ export default class GameScene extends Phaser.Scene {
 
                 // --- Player Body Segment Eating Check (Keep As Is - Only player does this) ---
                 let eatenByPlayerBody = false;
-                if (playerAlive) {
+                const playerIsGhosting = this.starEater && this.starEater.currentHeadLevel === 'middle' && this.starEater.isGhosting;
+                if (playerAlive && !playerIsGhosting) {
                     for (let i = 1; i < playerBodyParts.length; i++) {
                         const segment = playerBodyParts[i];
                         if (!segment || !segment.active) continue;
